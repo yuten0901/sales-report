@@ -108,22 +108,37 @@ def test_idempotent_reruns_produce_byte_identical_output(
 
 
 def test_idempotent_reruns_with_directory_input_and_multiple_files(
-    tmp_path: Path, make_csv
+    tmp_path: Path,
 ) -> None:
-    """複数ファイル入力(ディレクトリ)でも、ファイル発見順序がソートされ再実行で結果が変わらない。"""
-    make_csv("b_store.csv", f"{VALID_CSV_HEADER}\n2026-07-01,新宿店,商品B,2,200\n")
-    make_csv("a_store.csv", f"{VALID_CSV_HEADER}\n2026-07-01,渋谷店,商品A,1,100\n")
+    """複数ファイル入力(ディレクトリ)でも、ファイル発見順序がソートされ再実行で結果が変わらない。
 
-    output1 = tmp_path / "out1.csv"
-    output2 = tmp_path / "out2.csv"
+    FIX-10/Codex指摘の是正: 以前は出力先を入力ディレクトリの直下(tmp_path)に
+    置いており、2回目の実行が1回目の出力を入力として拾ってしまう欠陥があった
+    (FIX-03のパス衝突検知により、この状態は現在exit 2で明示的に拒否される)。
+    入力と出力を兄弟ディレクトリに分離し、意図した検証(冪等性)のみを行う。
+    """
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    (input_dir / "b_store.csv").write_text(
+        f"{VALID_CSV_HEADER}\n2026-07-01,新宿店,商品B,2,200\n", encoding="utf-8"
+    )
+    (input_dir / "a_store.csv").write_text(
+        f"{VALID_CSV_HEADER}\n2026-07-01,渋谷店,商品A,1,100\n", encoding="utf-8"
+    )
+
+    output_dir = tmp_path / "output"
+    output1 = output_dir / "out1.csv"
+    output2 = output_dir / "out2.csv"
 
     result1 = runner.invoke(
-        app, ["--input", str(tmp_path), "--format", "csv", "--output", str(output1)]
+        app, ["--input", str(input_dir), "--format", "csv", "--output", str(output1)]
     )
     result2 = runner.invoke(
-        app, ["--input", str(tmp_path), "--format", "csv", "--output", str(output2)]
+        app, ["--input", str(input_dir), "--format", "csv", "--output", str(output2)]
     )
 
     assert result1.exit_code == 0
     assert result2.exit_code == 0
     assert output1.read_bytes() == output2.read_bytes()
+    # 入力ディレクトリには最初の2ファイルしか無いこと(出力が紛れ込んでいないことの確認)。
+    assert sorted(p.name for p in input_dir.iterdir()) == ["a_store.csv", "b_store.csv"]

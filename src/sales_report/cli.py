@@ -31,6 +31,43 @@ EXIT_NO_DATA = 1
 EXIT_USAGE_ERROR = 2
 
 
+def _find_path_collision(
+    input_path: Path, output: Path, report_errors: Path | None
+) -> str | None:
+    """FIX-03/DEF-009: 入力パスと出力パスの衝突を検出する。
+
+    衝突したまま処理を続けると、元の入力データが集計結果で上書きされ、
+    exit 0で気づかれないまま消える(Sonnetの探索的テスト「自己上書きは
+    安全」は誤りだった。クラッシュしないこととデータが保全されることは別)。
+    パスは resolve() で正規化してから比較する(相対パス表記の違いを吸収)。
+    衝突が見つかった場合は理由の文字列を返す(呼び出し側でexit 2にする)。
+    """
+    input_resolved = input_path.resolve()
+    output_resolved = output.resolve()
+
+    if input_path.is_file():
+        if output_resolved == input_resolved:
+            return f"--outputが--inputと同じファイルです: {output}"
+    elif output_resolved == input_resolved or output_resolved.is_relative_to(input_resolved):
+        return f"--outputが--inputディレクトリの中を指しています: {output}"
+
+    if report_errors is not None:
+        report_errors_resolved = report_errors.resolve()
+        if input_path.is_file():
+            if report_errors_resolved == input_resolved:
+                return f"--report-errorsが--inputと同じファイルです: {report_errors}"
+        elif (
+            report_errors_resolved == input_resolved
+            or report_errors_resolved.is_relative_to(input_resolved)
+        ):
+            return f"--report-errorsが--inputディレクトリの中を指しています: {report_errors}"
+
+        if report_errors_resolved == output_resolved:
+            return f"--report-errorsが--outputと同じファイルです: {report_errors}"
+
+    return None
+
+
 @app.command()
 def main(
     input_path: Path = typer.Option(
@@ -65,6 +102,11 @@ def main(
 
     if not files:
         typer.echo(f"入力パスにCSVファイルが見つかりません: {input_path}", err=True)
+        raise typer.Exit(EXIT_USAGE_ERROR)
+
+    collision = _find_path_collision(input_path, output, report_errors)
+    if collision is not None:
+        typer.echo(f"入力と出力のパスが衝突しています。{collision}", err=True)
         raise typer.Exit(EXIT_USAGE_ERROR)
 
     result = load_files(files)

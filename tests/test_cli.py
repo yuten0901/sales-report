@@ -84,6 +84,34 @@ def test_bv_file_03_single_row_succeeds(tmp_path: Path, make_csv) -> None:
     assert result.exit_code == EXIT_SUCCESS
 
 
+def test_cli_warns_about_file_level_error_but_still_succeeds(tmp_path: Path) -> None:
+    """ファイルレベルのエラー(必須列不足等)が発生した場合、警告を表示しつつ
+    他の有効なファイルの処理は継続すること(1ファイルの事故で全体を止めない)。
+
+    この経路は以前、test_robustness.pyの冪等性テストが偶然(2回目の実行が
+    1回目の出力を入力として誤って拾うことで)カバーしていたが、その欠陥を
+    FIX-03で修正した際に偶然のカバレッジも失われた。意図的なテストとして
+    こちらに独立させる(偶然のカバレッジに頼らない、という教訓の実例)。
+    """
+    input_dir = tmp_path / "in"
+    input_dir.mkdir()
+    (input_dir / "good.csv").write_text(
+        f"{VALID_CSV_HEADER}\n2026-07-01,渋谷店,商品A,1,100\n", encoding="utf-8"
+    )
+    # 必須列(unit_price)が欠落したファイル→ファイルレベルエラーになる。
+    (input_dir / "broken.csv").write_text(
+        "date,store,product,quantity\n2026-07-01,渋谷店,商品B,1\n", encoding="utf-8"
+    )
+    output = tmp_path / "out" / "summary.md"
+
+    result = runner.invoke(app, ["--input", str(input_dir), "--output", str(output)])
+
+    assert result.exit_code == EXIT_SUCCESS
+    assert "broken.csv" in result.output
+    assert "読み込めませんでした" in result.output
+    assert output.exists()
+
+
 # --- DT-3: 出力オプションの組み合わせ ---------------------------------------
 
 
@@ -198,6 +226,177 @@ def test_dt2_06_report_errors_write_failure_exits_usage_error(
     )
     assert result.exit_code == EXIT_USAGE_ERROR
     # サマリレポート自体は正常に出力されている(部分的成功→エラーレポート書込のみ失敗)。
+    assert output.exists()
+
+
+# --- パス衝突検知(FIX-03/DEF-009) -------------------------------------------
+
+
+def test_fix03_input_file_equals_output_is_rejected_and_data_preserved(
+    tmp_path: Path,
+) -> None:
+    """入力ファイルと--outputが同一パスの場合、exit 2で拒否し元データを破壊しない。
+
+    Codex Critical#2で指摘された公開ブロッカー: 修正前は正常終了(exit 0)し、
+    元の入力CSVが集計結果のCSVで上書きされ、気づかれないままデータが消えていた。
+    """
+    data = tmp_path / "data.csv"
+    original_content = f"{VALID_CSV_HEADER}\n2026-01-01,渋谷店,商品A,3,1200\n"
+    data.write_text(original_content, encoding="utf-8")
+
+    result = runner.invoke(app, ["--input", str(data), "--format", "csv", "--output", str(data)])
+
+    assert result.exit_code == EXIT_USAGE_ERROR
+    # 最重要: 元データが一切変更されていないこと。
+    assert data.read_text(encoding="utf-8") == original_content
+
+
+def test_fix03_output_inside_input_directory_is_rejected(tmp_path: Path) -> None:
+    """入力ディレクトリの中に--outputを置く場合もexit 2で拒否する。
+
+    (将来の再実行で自分の出力を入力として拾ってしまう事故を未然に防ぐ)
+    """
+    input_dir = tmp_path / "in"
+    input_dir.mkdir()
+    (input_dir / "a.csv").write_text(
+        f"{VALID_CSV_HEADER}\n2026-01-01,渋谷店,商品A,1,100\n", encoding="utf-8"
+    )
+
+    result = runner.invoke(
+        app, ["--input", str(input_dir), "--output", str(input_dir / "summary.md")]
+    )
+
+    assert result.exit_code == EXIT_USAGE_ERROR
+    # 入力ディレクトリに出力ファイルが紛れ込んでいないこと。
+    assert sorted(p.name for p in input_dir.iterdir()) == ["a.csv"]
+
+
+def test_fix03_output_equals_report_errors_is_rejected(tmp_path: Path, make_csv) -> None:
+    """--outputと--report-errorsが同一パスの場合もexit 2で拒否する
+    (後から書き込む方が先の内容を上書きする事故を防ぐ)。
+    """
+    content = (
+        f"{VALID_CSV_HEADER}\n"
+        "2026-07-01,渋谷店,商品A,3,1200\n"
+        "invalid-date,渋谷店,商品B,1,500\n"
+    )
+    path = make_csv("mixed.csv", content)
+    same_path = tmp_path / "same.csv"
+
+    result = runner.invoke(
+        app,
+        [
+            "--input",
+            str(path),
+            "--format",
+            "csv",
+            "--output",
+            str(same_path),
+            "--report-errors",
+            str(same_path),
+        ],
+    )
+
+    assert result.exit_code == EXIT_USAGE_ERROR
+    assert not same_path.exists()
+
+
+def test_fix03_report_errors_equals_input_file_is_rejected(tmp_path: Path) -> None:
+    """--report-errorsが--input(単一ファイル)と同一パスの場合もexit 2で拒否する。"""
+    data = tmp_path / "data.csv"
+    original_content = f"{VALID_CSV_HEADER}\n2026-07-01,渋谷店,商品A,1,100\n"
+    data.write_text(original_content, encoding="utf-8")
+    output = tmp_path / "out" / "summary.csv"
+
+    result = runner.invoke(
+        app,
+        [
+            "--input",
+            str(data),
+            "--format",
+            "csv",
+            "--output",
+            str(output),
+            "--report-errors",
+            str(data),
+        ],
+    )
+
+    assert result.exit_code == EXIT_USAGE_ERROR
+    assert data.read_text(encoding="utf-8") == original_content
+
+
+def test_fix03_report_errors_inside_input_directory_is_rejected(tmp_path: Path) -> None:
+    """--report-errorsが--input(ディレクトリ)の中を指す場合もexit 2で拒否する。"""
+    input_dir = tmp_path / "in"
+    input_dir.mkdir()
+    (input_dir / "a.csv").write_text(
+        f"{VALID_CSV_HEADER}\n2026-07-01,渋谷店,商品A,1,100\n", encoding="utf-8"
+    )
+    output = tmp_path / "out" / "summary.csv"
+
+    result = runner.invoke(
+        app,
+        [
+            "--input",
+            str(input_dir),
+            "--format",
+            "csv",
+            "--output",
+            str(output),
+            "--report-errors",
+            str(input_dir / "errors.csv"),
+        ],
+    )
+
+    assert result.exit_code == EXIT_USAGE_ERROR
+    assert sorted(p.name for p in input_dir.iterdir()) == ["a.csv"]
+
+
+def test_fix03_directory_input_with_non_colliding_report_errors_succeeds(
+    tmp_path: Path,
+) -> None:
+    """入力がディレクトリで、--report-errorsが衝突しない場合は正常に成功すること
+    (ディレクトリ入力×report_errors指定という組み合わせの誤検知が無いことの確認)。
+    """
+    input_dir = tmp_path / "in"
+    input_dir.mkdir()
+    (input_dir / "a.csv").write_text(
+        f"{VALID_CSV_HEADER}\n2026-07-01,渋谷店,商品A,1,100\ninvalid-date,渋谷店,商品B,1,200\n",
+        encoding="utf-8",
+    )
+    output = tmp_path / "out" / "summary.csv"
+    errors_output = tmp_path / "out" / "errors.csv"
+
+    result = runner.invoke(
+        app,
+        [
+            "--input",
+            str(input_dir),
+            "--format",
+            "csv",
+            "--output",
+            str(output),
+            "--report-errors",
+            str(errors_output),
+        ],
+    )
+
+    assert result.exit_code == EXIT_SUCCESS
+    assert output.exists()
+    assert errors_output.exists()
+
+
+def test_fix03_normal_separate_paths_still_succeed(
+    tmp_path: Path, make_csv, valid_csv_content: str
+) -> None:
+    """衝突していない通常の入出力パスは、パス衝突検知の影響を受けず成功すること
+    (誤検知(false positive)が無いことの確認)。
+    """
+    path = make_csv("all_valid.csv", valid_csv_content)
+    output = tmp_path / "out" / "summary.md"
+    result = runner.invoke(app, ["--input", str(path), "--output", str(output)])
+    assert result.exit_code == EXIT_SUCCESS
     assert output.exists()
 
 
