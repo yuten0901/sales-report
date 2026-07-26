@@ -107,7 +107,7 @@ sales-report --input data/sample/sales.csv --slack-webhook https://hooks.slack.c
 pytest --cov --cov-report=term-missing   # 通常テスト(性能テストは除外)
 pytest -m slow                            # 性能テストのみ
 ruff check .                              # lint
-mypy src/                                 # 型チェック
+mypy src/ tests/                          # 型チェック(テストコード自体もstrict対象)
 mutmut run                                # ミューテーションテスト(要WSL。Windowsネイティブ非対応)
 ```
 
@@ -141,7 +141,7 @@ CIの実行結果(JUnit XML・カバレッジHTMLレポート)は各ワークフ
 pip install -e ".[dev]"
 pytest --cov
 ruff check .
-mypy src/
+mypy src/ tests/
 ```
 
 Python 3.11以上。依存関係は`pyproject.toml`参照。
