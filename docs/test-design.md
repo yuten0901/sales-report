@@ -104,6 +104,7 @@ ID接頭辞 `BV-`。
 | BV-ENC-02 | エンコーディング | UTF-8（BOM有り） | 正しく読める |
 | BV-ENC-03 | エンコーディング | Shift-JIS | 正しく読める |
 | BV-ENC-04 | エンコーディング | 上記いずれでもデコード不可 | 該当ファイルをスキップしファイルレベルエラー記録・処理継続 |
+| BV-ENC-05 | ファイル読込 | 読込時のOSError（権限エラー・読込中のファイル消失等） | 該当ファイルをスキップしファイルレベルエラー記録・処理継続（FIX-06/DEF-012。当初`UnicodeDecodeError`のみ捕捉しておりOSErrorは未捕捉で全体停止していた） |
 | BV-DUP-01 | 明細 | 同一date/store/productが複数行 | エラーにせず合算 |
 | BV-SEC-01 | 出力文字列 | `=cmd`, `+1+1`, `-1`, `@SUM(A1)` で始まる値 | CSV出力時 `'` を先頭付与し無害化 |
 | BV-SEC-02 | 出力文字列 | 通常の文字列（上記記号で始まらない） | 無害化されず、そのまま出力 |
@@ -176,6 +177,7 @@ ID接頭辞 `DT-`。
 | BV-ENC-02 | `tests/test_loader.py` | `test_load_file_utf8_with_bom` |
 | BV-ENC-03 | `tests/test_loader.py` | `test_load_file_shift_jis` |
 | BV-ENC-04 | `tests/test_loader.py` | `test_load_file_undecodable_bytes_becomes_file_error`, `test_load_files_one_broken_file_does_not_stop_others` |
+| BV-ENC-05 | `tests/test_loader.py` | `test_load_file_permission_error_becomes_file_error_not_crash`, `test_load_files_permission_error_on_one_file_does_not_stop_others` |
 | BV-DUP-01 | `tests/test_aggregate.py` | `test_aggregate_duplicate_lines_are_summed` |
 | BV-SEC-01 | `tests/test_report.py` | `test_sanitize_csv_field_neutralizes_dangerous_prefixes[BV-SEC-01-*]`, `test_render_csv_report_sanitizes_dangerous_store_name` |
 | BV-SEC-02 | `tests/test_report.py` | `test_sanitize_csv_field_leaves_normal_values_untouched[BV-SEC-02-*]` |

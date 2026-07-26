@@ -82,7 +82,18 @@ def load_file(path: Path) -> tuple[list[SaleRow], list[RowError], FileError | No
     ファイルエラーが発生した場合、rows/row_errorsは空リストになる(そのファイルは
     まるごとスキップされ、他のファイルの処理は継続される=1ファイルの事故で全体を止めない)。
     """
-    text = _read_text_with_fallback(path)
+    try:
+        text = _read_text_with_fallback(path)
+    except OSError as e:
+        # FIX-06/DEF-012: 権限エラー・読込中のファイル消失等のI/Oエラーも
+        # ファイル単位のエラーとして扱い、他のファイルの処理を継続する
+        # (文字コード判定に限らず「1ファイルの事故で全体を止めない」を徹底する)。
+        # OSErrorはエンコーディングと無関係のため、全エンコーディングを試す
+        # 意味が無く_read_text_with_fallback内では捕捉せずここで一度だけ処理する。
+        return [], [], FileError(
+            path=path,
+            reason=f"ファイルを読み込めませんでした: {e}",
+        )
     if text is None:
         return [], [], FileError(
             path=path,

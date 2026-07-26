@@ -14,6 +14,7 @@
 | DEF-009 | 入力=出力を指定すると、正常終了のまま元データがサマリで上書きされ消える | **最高**(サイレントなデータ損失。Sonnetの探索的テストが「安全」と誤判定していた) |
 | DEF-010 | 桁数無制限のためDecimal既定精度28桁を超えると例外なく金額が誤計算される | **高**(金額ツールとして致命的観点。例外・警告が一切出ない) |
 | DEF-011 | Slack Webhook URL(秘密情報)がエラーメッセージ経由でログに漏洩する | **高**(URL自体がcredential。stderr/CIログへの露出はSlackアカウント乗っ取りに繋がり得る) |
+| DEF-012 | 読込時のOSError(権限エラー等)が未捕捉で全体停止する | **中**(「1ファイルの事故で止めない」原則がエンコーディング以外のI/Oエラーには適用されていなかった) |
 
 ---
 
@@ -133,3 +134,15 @@
 - **修正**: `notify.py`で`requests.HTTPError`と`requests.RequestException`を分けて捕捉し、ユーザー向けメッセージには**HTTPステータスコードまたは例外の種別名のみ**を含める（URLやトークンを含む詳細文字列は含めない）。元の例外は`raise NotifyError(msg) from e`で例外チェーン（`__cause__`）として保持するため、必要であればPythonのtracebackやデバッガから追跡できるが、**通常のユーザー向け表示・ログには出ない**。
 - **追加した回帰テスト**: `tests/test_notify.py`に秘密トークンを含む模擬Webhook URLを使ったテストを追加（`test_send_slack_summary_http_error_does_not_leak_webhook_url`、`test_send_slack_summary_connection_error_does_not_leak_webhook_url`）。例外メッセージにトークン・URLが含まれないことを直接アサートする。あわせて`test_send_slack_summary_original_exception_still_chained`で、表示上は秘密を隠しつつ原因追跡用の例外チェーンは保持されていることも検証。**修正前コードに戻すと両テストが実際に赤（トークンが露出）になることを確認済み**。
 - **教訓**: 例外メッセージを「詳細だから親切」という理由でそのままユーザーに見せる実装は、詳細情報の中身を精査していないと危険。特に**URLに認証情報を埋め込む方式のAPI**（Slack/Discord Incoming Webhook、多くのSaaSのWebhook機能）を扱うコードでは、例外処理を書く際に「このエラーメッセージのどこかにURLが含まれていないか」を必ず確認する。
+
+## DEF-012: 読込時のOSError(権限エラー等)が未捕捉で全体停止する（Codex #11）
+
+- **発見日**: 2026-07-26
+- **検出手段**: 公開前のCodexレビュー。「エンコーディング判定は`UnicodeDecodeError`しか捕捉していないため、読込中のOSError・権限エラー・ファイル消失はファイル単位エラーにならず全体を停止する」という指摘を受け実機で再現。
+- **再現手順**: `unittest.mock`で`Path.read_text`が`PermissionError`を送出するようにし、`load_file()`を呼び出す。
+- **期待**: 「1ファイルの事故で全体を止めない」という設計原則（README・test-design.mdに明記）どおり、当該ファイルのみファイルレベルエラーとして記録され、他のファイルの処理は継続される。
+- **実際**: `_read_text_with_fallback()`が`UnicodeDecodeError`のみを`try/except`で捕捉しており、`PermissionError`等の`OSError`は未捕捉のまま`load_file()`・`load_files()`を通じてCLI全体まで伝播し、処理が完全に停止していた。
+- **原因分析**: 「文字コード判定の失敗」（`UnicodeDecodeError`）と「そもそもファイルが読めない」（`OSError`）という**性質の異なる2種類の失敗モード**を、実装時に区別せず「デコード周りのエラー」として一括りに考えてしまっていた。「1ファイルの事故で全体を止めない」という設計原則を、文字コード判定という特定のシナリオにしか適用できていなかった。
+- **修正**: `loader.py`の`load_file()`で`_read_text_with_fallback(path)`の呼び出しを`try/except OSError`で囲み、発生した場合はファイルレベルエラーとして記録して処理を継続する。`OSError`はエンコーディングと無関係なため、`_read_text_with_fallback`内部の複数エンコーディングを試すループでは捕捉せず、呼び出し側で一度だけ処理する設計にした（同じI/Oエラーがエンコーディングを変えても再現するだけで、リトライする意味が無いため）。
+- **追加した回帰テスト**: `tests/test_loader.py::test_load_file_permission_error_becomes_file_error_not_crash`（単一ファイルでの検証）、`test_load_files_permission_error_on_one_file_does_not_stop_others`（複数ファイル中の1つが権限エラーでも、他の有効なファイルの処理が継続されることを検証）。**修正前コードに戻すと両テストが実際に赤（`PermissionError`が未捕捉で伝播）になることを確認済み**。
+- **教訓**: 「例外を1種類だけ捕捉している」コードを見たら、「本当にその例外だけが起こり得るのか」を疑う。ファイルI/O関連の処理では、デコードエラー・権限エラー・ファイル消失・ディスクエラーなど**複数の異なる失敗モードが同じ操作（`read_text()`等）から起こり得る**ことを前提に設計する。

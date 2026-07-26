@@ -6,6 +6,7 @@ docs/test-design.md の BV-FILE-*(ファイル境界) / BV-ENC-*(文字コード
 from __future__ import annotations
 
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
@@ -91,6 +92,49 @@ def test_load_file_undecodable_bytes_becomes_file_error(tmp_path: Path) -> None:
     assert errors == []
     assert isinstance(file_error, FileError)
     assert "文字コード" in file_error.reason
+
+
+def test_load_file_permission_error_becomes_file_error_not_crash(tmp_path: Path) -> None:
+    """FIX-06/DEF-012: 読込時の権限エラー(OSError)もファイルエラーとして扱われ、
+    クラッシュせず処理が継続すること。UnicodeDecodeErrorのみを捕捉していた
+    従来実装では、OSErrorは未捕捉のまま伝播しCLI全体が停止していた(Codex#11)。
+    """
+    path = tmp_path / "no_permission.csv"
+    path.write_text(f"{VALID_CSV_HEADER}\n2026-07-01,渋谷店,商品A,1,100\n", encoding="utf-8")
+
+    with mock.patch.object(Path, "read_text", side_effect=PermissionError("permission denied")):
+        rows, errors, file_error = load_file(path)
+
+    assert rows == []
+    assert errors == []
+    assert isinstance(file_error, FileError)
+    assert "読み込めませんでした" in file_error.reason
+
+
+def test_load_files_permission_error_on_one_file_does_not_stop_others(
+    tmp_path: Path, make_csv
+) -> None:
+    """1ファイルの権限エラーで全体が止まらず、他のファイルの処理は継続されること。"""
+    good = make_csv("good.csv", f"{VALID_CSV_HEADER}\n2026-07-01,渋谷店,商品A,1,100\n")
+    bad = tmp_path / "bad.csv"
+    bad.write_text(f"{VALID_CSV_HEADER}\n2026-07-01,新宿店,商品B,1,200\n", encoding="utf-8")
+
+    original_read_text = Path.read_text
+
+    def flaky_read_text(self: Path, *args: object, **kwargs: object) -> str:
+        if self == bad:
+            raise PermissionError("permission denied")
+        return original_read_text(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    with mock.patch.object(Path, "read_text", flaky_read_text):
+        files = discover_csv_files(tmp_path)
+        result = load_files(files)
+
+    assert len(result.rows) == 1
+    assert result.rows[0].store == "渋谷店"
+    assert len(result.file_errors) == 1
+    assert result.file_errors[0].path == bad
+    assert good.exists()
 
 
 # --- load_file: ファイル境界(BV-FILE-*) -----------------------------------
