@@ -38,7 +38,7 @@ def test_send_slack_summary_success_posts_expected_payload() -> None:
 
     assert len(responses.calls) == 1
     sent_body = responses.calls[0].request.body
-    assert sent_body is not None
+    assert isinstance(sent_body, bytes)
     assert "3600" in sent_body.decode("utf-8")
 
 

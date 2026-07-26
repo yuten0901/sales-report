@@ -34,7 +34,7 @@ from sales_report.report import (
     sanitize_csv_field,
 )
 
-from .conftest import VALID_CSV_HEADER
+from .conftest import VALID_CSV_HEADER, MakeCsv
 
 runner = CliRunner()
 
@@ -220,7 +220,7 @@ def test_wiring_slack_payload_includes_store_and_product_count_labels() -> None:
 
 
 def test_wiring_cli_structured_log_skipped_rows_matches_actual_count(
-    tmp_path: Path, make_csv
+    tmp_path: Path, make_csv: MakeCsv
 ) -> None:
     """一部の行がスキップされるケースで、構造化ログのskipped_rowsが
     ハードコードされた0等ではなく、実際のスキップ件数と一致すること。

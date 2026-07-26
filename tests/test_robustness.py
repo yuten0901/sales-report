@@ -5,17 +5,18 @@ docs/test-design.md §1.3(原子的書き込み・冪等性)に対応する。
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
+from typing import Any, Literal
 from unittest import mock
 
 import pytest
 from typer.testing import CliRunner
 
-import sales_report.report as report_module
 from sales_report.cli import app
 from sales_report.report import write_atomic
 
-from .conftest import VALID_CSV_HEADER
+from .conftest import VALID_CSV_HEADER, MakeCsv
 
 runner = CliRunner()
 
@@ -27,16 +28,16 @@ def test_atomic_write_interruption_leaves_previous_content_intact(
     target = tmp_path / "report.csv"
     target.write_text("old-content\n", encoding="utf-8")
 
-    original_fdopen = report_module.os.fdopen
+    original_fdopen = os.fdopen
 
-    def broken_fdopen(fd: int, *args: object, **kwargs: object):  # type: ignore[no-untyped-def]
+    def broken_fdopen(fd: int, *args: Any, **kwargs: Any):  # type: ignore[no-untyped-def]
         real_file = original_fdopen(fd, *args, **kwargs)
 
         class BrokenWriter:
             def __enter__(self) -> BrokenWriter:
                 return self
 
-            def __exit__(self, exc_type: object, exc: object, tb: object) -> bool:
+            def __exit__(self, exc_type: object, exc: object, tb: object) -> Literal[False]:
                 real_file.close()
                 return False
 
@@ -47,7 +48,7 @@ def test_atomic_write_interruption_leaves_previous_content_intact(
 
         return BrokenWriter()
 
-    monkeypatch.setattr(report_module.os, "fdopen", broken_fdopen)
+    monkeypatch.setattr(os, "fdopen", broken_fdopen)
 
     with pytest.raises(OSError, match="シミュレートされた中断"):
         write_atomic(target, "new-content-that-is-considerably-longer\n")
@@ -66,15 +67,13 @@ def test_atomic_write_interruption_when_no_previous_file_leaves_nothing(
     target = tmp_path / "report.csv"
 
     def broken_fdopen(fd: int, *args: object, **kwargs: object):  # type: ignore[no-untyped-def]
-        import os as os_module
-
-        os_module.close(fd)
+        os.close(fd)
 
         class AlwaysFails:
             def __enter__(self) -> AlwaysFails:
                 return self
 
-            def __exit__(self, exc_type: object, exc: object, tb: object) -> bool:
+            def __exit__(self, exc_type: object, exc: object, tb: object) -> Literal[False]:
                 return False
 
             def write(self, data: str) -> int:
@@ -83,7 +82,7 @@ def test_atomic_write_interruption_when_no_previous_file_leaves_nothing(
 
         return AlwaysFails()
 
-    monkeypatch.setattr(report_module.os, "fdopen", broken_fdopen)
+    monkeypatch.setattr(os, "fdopen", broken_fdopen)
 
     with pytest.raises(OSError, match="シミュレートされた中断"):
         write_atomic(target, "content\n")
@@ -102,16 +101,16 @@ def test_write_atomic_closes_fd_when_fdopen_itself_fails(
     """
     target = tmp_path / "report.csv"
     closed_fds: list[int] = []
-    original_close = report_module.os.close
+    original_close = os.close
 
     def spy_close(fd: int) -> None:
         closed_fds.append(fd)
         original_close(fd)
 
     monkeypatch.setattr(
-        report_module.os, "fdopen", mock.Mock(side_effect=LookupError("unknown encoding"))
+        os, "fdopen", mock.Mock(side_effect=LookupError("unknown encoding"))
     )
-    monkeypatch.setattr(report_module.os, "close", spy_close)
+    monkeypatch.setattr(os, "close", spy_close)
 
     with pytest.raises(LookupError):
         write_atomic(target, "content\n")
@@ -122,7 +121,7 @@ def test_write_atomic_closes_fd_when_fdopen_itself_fails(
 
 
 def test_idempotent_reruns_produce_byte_identical_output(
-    tmp_path: Path, make_csv, valid_csv_content: str
+    tmp_path: Path, make_csv: MakeCsv, valid_csv_content: str
 ) -> None:
     """性質: 同一入力・同一オプションで複数回実行しても出力はバイト同一(冪等性)。"""
     path = make_csv("data.csv", valid_csv_content)

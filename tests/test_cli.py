@@ -13,16 +13,17 @@ from typer.testing import CliRunner
 
 from sales_report.cli import EXIT_NO_DATA, EXIT_SUCCESS, EXIT_USAGE_ERROR, app
 
-from .conftest import VALID_CSV_HEADER
+from .conftest import VALID_CSV_HEADER, MakeCsv
 
 runner = CliRunner()
 
 
-def _find_json_summary_line(text: str) -> dict:
+def _find_json_summary_line(text: str) -> dict[str, object]:
     for line in text.splitlines():
         line = line.strip()
         if line.startswith("{"):
-            return json.loads(line)
+            result: dict[str, object] = json.loads(line)
+            return result
     raise AssertionError(f"構造化ログのJSON行が見つかりませんでした: {text!r}")
 
 
@@ -52,7 +53,7 @@ def test_a3_non_csv_file_directly_specified_exits_usage_error(tmp_path: Path) ->
     assert result.exit_code == EXIT_USAGE_ERROR
 
 
-def test_dt2_03_zero_valid_rows_exits_no_data(tmp_path: Path, make_csv) -> None:
+def test_dt2_03_zero_valid_rows_exits_no_data(tmp_path: Path, make_csv: MakeCsv) -> None:
     path = make_csv("empty_data.csv", f"{VALID_CSV_HEADER}\n")  # ヘッダのみ
     output = tmp_path / "out" / "summary.md"
     result = runner.invoke(app, ["--input", str(path), "--output", str(output)])
@@ -61,7 +62,7 @@ def test_dt2_03_zero_valid_rows_exits_no_data(tmp_path: Path, make_csv) -> None:
 
 
 def test_dt2_04_partial_valid_rows_exits_success_with_warning(
-    tmp_path: Path, make_csv
+    tmp_path: Path, make_csv: MakeCsv
 ) -> None:
     content = (
         f"{VALID_CSV_HEADER}\n"
@@ -77,7 +78,7 @@ def test_dt2_04_partial_valid_rows_exits_success_with_warning(
 
 
 def test_dt2_05_all_valid_rows_exits_success(
-    tmp_path: Path, make_csv, valid_csv_content: str
+    tmp_path: Path, make_csv: MakeCsv, valid_csv_content: str
 ) -> None:
     path = make_csv("all_valid.csv", valid_csv_content)
     output = tmp_path / "out" / "summary.md"
@@ -87,7 +88,7 @@ def test_dt2_05_all_valid_rows_exits_success(
     assert "スキップ" not in result.output
 
 
-def test_bv_file_03_single_row_succeeds(tmp_path: Path, make_csv) -> None:
+def test_bv_file_03_single_row_succeeds(tmp_path: Path, make_csv: MakeCsv) -> None:
     content = f"{VALID_CSV_HEADER}\n2026-07-01,渋谷店,商品A,1,100\n"
     path = make_csv("single.csv", content)
     output = tmp_path / "out" / "summary.md"
@@ -127,7 +128,7 @@ def test_cli_warns_about_file_level_error_but_still_succeeds(tmp_path: Path) -> 
 
 
 def test_dt3_01_markdown_without_report_errors_skips_error_file(
-    tmp_path: Path, make_csv
+    tmp_path: Path, make_csv: MakeCsv
 ) -> None:
     content = (
         f"{VALID_CSV_HEADER}\n"
@@ -147,7 +148,7 @@ def test_dt3_01_markdown_without_report_errors_skips_error_file(
 
 
 def test_dt3_02_csv_format_with_report_errors_writes_both_files(
-    tmp_path: Path, make_csv
+    tmp_path: Path, make_csv: MakeCsv
 ) -> None:
     content = (
         f"{VALID_CSV_HEADER}\n"
@@ -177,7 +178,7 @@ def test_dt3_02_csv_format_with_report_errors_writes_both_files(
 
 
 def test_dt3_03_report_errors_specified_but_no_skips_creates_no_file(
-    tmp_path: Path, make_csv, valid_csv_content: str
+    tmp_path: Path, make_csv: MakeCsv, valid_csv_content: str
 ) -> None:
     """DT-3-03: エラーが0件なら--report-errors指定時でも空ファイルを作らない。"""
     path = make_csv("all_valid.csv", valid_csv_content)
@@ -192,7 +193,7 @@ def test_dt3_03_report_errors_specified_but_no_skips_creates_no_file(
 
 
 def test_dt3_04_invalid_format_exits_usage_error(
-    tmp_path: Path, make_csv, valid_csv_content: str
+    tmp_path: Path, make_csv: MakeCsv, valid_csv_content: str
 ) -> None:
     path = make_csv("all_valid.csv", valid_csv_content)
     result = runner.invoke(app, ["--input", str(path), "--format", "xml"])
@@ -203,7 +204,7 @@ def test_dt3_04_invalid_format_exits_usage_error(
 
 
 def test_dt2_06_output_write_failure_exits_usage_error_not_no_data(
-    tmp_path: Path, make_csv, valid_csv_content: str
+    tmp_path: Path, make_csv: MakeCsv, valid_csv_content: str
 ) -> None:
     """FIX-02/DEF-008: 出力先に書き込めない場合はexit 2(入力・利用方法エラー)。
 
@@ -222,7 +223,7 @@ def test_dt2_06_output_write_failure_exits_usage_error_not_no_data(
 
 
 def test_dt2_06_report_errors_write_failure_exits_usage_error(
-    tmp_path: Path, make_csv
+    tmp_path: Path, make_csv: MakeCsv
 ) -> None:
     """--report-errorsの書込失敗も同様にexit 2になること。"""
     content = (
@@ -287,7 +288,7 @@ def test_fix03_output_inside_input_directory_is_rejected(tmp_path: Path) -> None
     assert sorted(p.name for p in input_dir.iterdir()) == ["a.csv"]
 
 
-def test_fix03_output_equals_report_errors_is_rejected(tmp_path: Path, make_csv) -> None:
+def test_fix03_output_equals_report_errors_is_rejected(tmp_path: Path, make_csv: MakeCsv) -> None:
     """--outputと--report-errorsが同一パスの場合もexit 2で拒否する
     (後から書き込む方が先の内容を上書きする事故を防ぐ)。
     """
@@ -404,7 +405,7 @@ def test_fix03_directory_input_with_non_colliding_report_errors_succeeds(
 
 
 def test_fix03_normal_separate_paths_still_succeed(
-    tmp_path: Path, make_csv, valid_csv_content: str
+    tmp_path: Path, make_csv: MakeCsv, valid_csv_content: str
 ) -> None:
     """衝突していない通常の入出力パスは、パス衝突検知の影響を受けず成功すること
     (誤検知(false positive)が無いことの確認)。
@@ -420,7 +421,7 @@ def test_fix03_normal_separate_paths_still_succeed(
 
 
 def test_structured_log_summary_emitted_on_success(
-    tmp_path: Path, make_csv, valid_csv_content: str
+    tmp_path: Path, make_csv: MakeCsv, valid_csv_content: str
 ) -> None:
     path = make_csv("all_valid.csv", valid_csv_content)
     output = tmp_path / "out" / "summary.md"
@@ -430,7 +431,7 @@ def test_structured_log_summary_emitted_on_success(
     assert summary["valid_rows"] == 3
 
 
-def test_structured_log_summary_emitted_on_no_data(tmp_path: Path, make_csv) -> None:
+def test_structured_log_summary_emitted_on_no_data(tmp_path: Path, make_csv: MakeCsv) -> None:
     path = make_csv("empty.csv", f"{VALID_CSV_HEADER}\n")
     result = runner.invoke(app, ["--input", str(path)])
     summary = _find_json_summary_line(result.output)
@@ -443,7 +444,7 @@ def test_structured_log_summary_emitted_on_no_data(tmp_path: Path, make_csv) -> 
 
 @responses.activate
 def test_slack_notify_success_does_not_change_exit_code(
-    tmp_path: Path, make_csv, valid_csv_content: str
+    tmp_path: Path, make_csv: MakeCsv, valid_csv_content: str
 ) -> None:
     webhook = "https://hooks.slack.example.com/services/T0/B0/X"
     responses.add(responses.POST, webhook, json={"ok": True}, status=200)
@@ -458,7 +459,7 @@ def test_slack_notify_success_does_not_change_exit_code(
 
 @responses.activate
 def test_slack_notify_failure_still_succeeds_overall(
-    tmp_path: Path, make_csv, valid_csv_content: str
+    tmp_path: Path, make_csv: MakeCsv, valid_csv_content: str
 ) -> None:
     """通知失敗はレポート生成という主目的の成否に影響させない。"""
     webhook = "https://hooks.slack.example.com/services/T0/B0/X"

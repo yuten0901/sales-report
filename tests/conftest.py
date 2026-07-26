@@ -13,12 +13,19 @@ datetime.now()等を使っておらず、出力にタイムスタンプを埋め
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Protocol
 
 import pytest
 
 
+class MakeCsv(Protocol):
+    """`make_csv`フィクスチャが返す関数の型(残存リスク#12対応でtests/にも型を導入)。"""
+
+    def __call__(self, name: str, content: str, encoding: str = "utf-8") -> Path: ...
+
+
 @pytest.fixture
-def make_csv(tmp_path: Path):
+def make_csv(tmp_path: Path) -> MakeCsv:
     """指定した内容・エンコーディングでCSVファイルを作成するヘルパーを返す。"""
 
     def _make(name: str, content: str, encoding: str = "utf-8") -> Path:

@@ -25,7 +25,7 @@ from .strategies import sale_rows
 
 @given(rows=sale_rows())
 @settings(max_examples=100)
-def test_property_total_amount_equals_sum_of_store_amounts(rows: list) -> None:
+def test_property_total_amount_equals_sum_of_store_amounts(rows: list[SaleRow]) -> None:
     """性質1: 総売上金額は、店舗別集計の合計と必ず一致する。"""
     result = aggregate(rows)
     assert result.total_amount == sum((s.amount for s in result.by_store), Decimal("0"))
@@ -33,7 +33,7 @@ def test_property_total_amount_equals_sum_of_store_amounts(rows: list) -> None:
 
 @given(rows=sale_rows())
 @settings(max_examples=100)
-def test_property_total_amount_equals_sum_of_product_amounts(rows: list) -> None:
+def test_property_total_amount_equals_sum_of_product_amounts(rows: list[SaleRow]) -> None:
     """性質2: 総売上金額は、商品別集計の合計とも必ず一致する。"""
     result = aggregate(rows)
     assert result.total_amount == sum((p.amount for p in result.by_product), Decimal("0"))
@@ -41,7 +41,7 @@ def test_property_total_amount_equals_sum_of_product_amounts(rows: list) -> None
 
 @given(rows=sale_rows())
 @settings(max_examples=100)
-def test_property_total_amount_equals_sum_of_date_amounts(rows: list) -> None:
+def test_property_total_amount_equals_sum_of_date_amounts(rows: list[SaleRow]) -> None:
     """性質3: 総売上金額は、日別集計の合計とも必ず一致する。"""
     result = aggregate(rows)
     assert result.total_amount == sum((d.amount for d in result.by_date), Decimal("0"))
@@ -49,7 +49,7 @@ def test_property_total_amount_equals_sum_of_date_amounts(rows: list) -> None:
 
 @given(rows=sale_rows())
 @settings(max_examples=100)
-def test_property_total_quantity_equals_sum_of_store_quantities(rows: list) -> None:
+def test_property_total_quantity_equals_sum_of_store_quantities(rows: list[SaleRow]) -> None:
     """性質4: 総数量も、店舗別集計の合計と一致する(金額だけでなく数量も検証)。"""
     result = aggregate(rows)
     assert result.total_quantity == sum(s.quantity for s in result.by_store)
@@ -57,7 +57,7 @@ def test_property_total_quantity_equals_sum_of_store_quantities(rows: list) -> N
 
 @given(rows=sale_rows(min_size=1, max_size=30))
 @settings(max_examples=50)
-def test_property_aggregate_is_order_independent(rows: list) -> None:
+def test_property_aggregate_is_order_independent(rows: list[SaleRow]) -> None:
     """性質5: 行の入力順序を入れ替えても集計結果(合計)は不変。"""
     shuffled = rows[:]
     random.Random(42).shuffle(shuffled)
@@ -74,7 +74,7 @@ def test_property_aggregate_is_order_independent(rows: list) -> None:
 
 @given(rows=sale_rows())
 @settings(max_examples=100)
-def test_property_no_negative_amounts_when_inputs_nonnegative(rows: list) -> None:
+def test_property_no_negative_amounts_when_inputs_nonnegative(rows: list[SaleRow]) -> None:
     """性質6: 入力(quantity, unit_price)が常に0以上なら、集計結果に負の金額は現れない。
 
     注記(FIX-09で再検討): この性質は、生成戦略(strategies.sale_rows)が既に
