@@ -213,3 +213,32 @@ ID接頭辞 `DT-`。
 | 性能（10万行） | 低〜中 | 想定利用規模では通常発生しないが、将来の拡張に備え下限保証はしておく |
 
 この優先度は `docs/test-report.md` の実施結果・残存リスクの記述と対応させる。
+
+## 7. 配線（呼び出し側）の検証（FIX-08/DEF-013・2026-07-26追加）
+
+### 背景
+
+別コンテキストレビューが手動ミューテーションを12箇所に仕込んだところ、**8箇所が生存**した（テストを全く落とさずに検知漏れ）。原因は共通していた: **`sanitize_csv_field()`・`escape_markdown_cell()`・`requests.post(timeout=...)`等の関数は単体テストされているが、それが呼び出し側で実際に使われているか（配線）は誰も検証していなかった**。関数の呼び出しを削除しても、関数自体の単体テストは（呼び出されないまま）通過し続けるため、カバレッジも見かけ上は変化しないことがある。
+
+### 対応
+
+`tests/test_output_wiring.py` を新設し、**最終出力を`csv.reader`で再パースして各セルを厳密比較する**形で、以下8つの配線を独立に検証する。単なる文字列の部分一致（`in`演算子）では列のずれや偶然の一致を見逃すため、CSV出力は必ず再パースしてセル単位で比較する（Codexレビュー指摘）。
+
+| # | 検証対象の配線 | テスト関数 | 生存確認済みミューテーション |
+|---|---|---|---|
+| 1 | CSV出力の商品列でサニタイズが実際に呼ばれる（店舗列だけでなく） | `test_wiring_csv_report_sanitizes_product_column_not_only_store` | 商品列の`sanitize_csv_field()`呼び出しを削除 |
+| 2 | CSV出力の店舗列サニタイズをCSV再パースで厳密確認 | `test_wiring_csv_report_sanitizes_store_column_via_reparse` | （既存テストの再パース版強化） |
+| 3 | Markdown出力で店舗名・商品名の`\|`が実際にエスケープされる | `test_wiring_markdown_report_escapes_pipe_in_store_and_product` | `escape_markdown_cell()`呼び出しを削除 |
+| 4 | Markdown出力で店舗名の改行が実際にエスケープされる | `test_wiring_markdown_report_escapes_newline_in_store` | （同上の改行版） |
+| 5 | エラーCSVの理由列サニタイズをCSV再パースで確認（パス列だけでなく） | `test_wiring_errors_csv_sanitizes_reason_column_via_reparse` | 理由列の`sanitize_csv_field()`呼び出しを削除 |
+| 6 | エラーCSVのパス列サニタイズをCSV再パースで確認（FIX-07の強化版） | `test_wiring_errors_csv_sanitizes_path_column_via_reparse` | （FIX-07で対応済み・再パース版で再確認） |
+| 7 | `send_slack_summary()`が`requests.post()`に`timeout`を実際に渡す | `test_wiring_send_slack_summary_passes_timeout_to_requests_post` | `timeout=timeout`引数を削除（`responses`ライブラリはワイヤー上のHTTPしか見えずtimeoutを検証できないため`requests.post`自体をモック） |
+| 8 | Slack本文に店舗数・商品数の行が実際に含まれる | `test_wiring_slack_payload_includes_store_and_product_count_labels` | 店舗数/商品数の行を削除（**旧テストは通過したまま**=総数量の値と偶然一致する`in`判定だったため検知不能だった実例） |
+| 9 | 構造化ログの`skipped_rows`が実際のスキップ件数と一致する（部分スキップ時） | `test_wiring_cli_structured_log_skipped_rows_matches_actual_count` | `skipped_rows`を`0`にハードコード（**旧テストは通過したまま**=全行有効/有効行0件のケースしか検証していなかったため） |
+| 10 | ファイル読込エラーの警告表示（cli.py）が実際に出る | `test_cli_warns_about_file_level_error_but_still_succeeds`（FIX-03で追加済み） | 警告表示のブロックごと削除 |
+
+追加で、`sanitize_csv_field`のパラメータ化テストに**`\r`（CR）始まりのケース**を追加した（`test_wiring_sanitize_csv_field_neutralizes_cr_prefix`）。`_CSV_INJECTION_PREFIXES`には`\r`が含まれていたが、既存のテストケース一覧に`\r`始まりの入力が無く、`\r`をタプルから削除しても検知できなかった（Codexレビュー指摘）。
+
+### 検証結果
+
+上記10項目全てについて、**該当コードを実際に一時的に変異させ、追加した配線テストが赤になること、かつ修正を戻すと緑に戻ることを確認した**。特に#8・#9は「旧テストは変異後も通過したまま、新しい配線テストだけが検知する」ことを実際に再現し、別コンテキストレビューの指摘（関数単体テストと配線検証は別物）を実証した。
