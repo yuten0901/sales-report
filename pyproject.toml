@@ -1,0 +1,75 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sales-report"
+version = "0.1.0"
+description = "複数の売上CSVを集計してサマリレポートを出力するCLIツール"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Yusuke Miyajima" }]
+dependencies = [
+    "typer>=0.12.0",
+    "requests>=2.32.0",
+]
+
+[project.scripts]
+sales-report = "sales_report.cli:app"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=5.0.0",
+    "hypothesis>=6.100.0",
+    "mutmut>=3.2.0",
+    "responses>=0.25.0",
+    "freezegun>=1.5.0",
+    "ruff>=0.6.0",
+    "mypy>=1.11.0",
+    "pip-audit>=2.7.0",
+    "bandit>=1.7.9",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sales_report"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "slow: 大容量・性能テスト(通常実行から分離)",
+]
+addopts = "-ra --strict-markers -m \"not slow\""
+
+[tool.coverage.run]
+source = ["src/sales_report"]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "C4"]
+# B008: typer.Option(...)を引数デフォルトに書くのはTyperの標準パターンであるため対象外にする。
+per-file-ignores = { "src/sales_report/cli.py" = ["B008"] }
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+disallow_untyped_defs = true
+warn_return_any = true
+
+[[tool.mypy.overrides]]
+module = "mutmut.*"
+ignore_missing_imports = true
+
+[tool.mutmut]
+source_paths = ["src"]

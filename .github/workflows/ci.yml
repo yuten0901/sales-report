@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (${{ matrix.os }}, py${{ matrix.python-version }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.11", "3.12", "3.13"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: python -m pip install -e ".[dev]"
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      - name: Type check (mypy)
+        run: mypy src/
+
+      - name: Test with coverage
+        run: >
+          pytest
+          --cov --cov-report=xml --cov-report=html --cov-fail-under=95
+          --junitxml=junit.xml
+
+      # JUnit XML/HTMLカバレッジレポートをエビデンスとしてartifact保存する。
+      # (手作業のエビデンス収集を、CIの成果物として自動で残す形に置き換える狙い)
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-evidence-${{ matrix.os }}-py${{ matrix.python-version }}
+          path: |
+            junit.xml
+            htmlcov/
+            coverage.xml
+          retention-days: 30
+
+  publish-coverage-report:
+    name: Publish coverage report to GitHub Pages
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Download coverage HTML (ubuntu / py3.12 representative leg)
+        uses: actions/download-artifact@v4
+        with:
+          name: test-evidence-ubuntu-latest-py3.12
+          path: report
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: report/htmlcov
+
+      - id: deployment
+        uses: actions/deploy-pages@v4
+
+  pr-summary:
+    name: Post test result summary on PR
+    needs: test
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      checks: write
+      contents: read
+    steps:
+      - name: Download JUnit results (all matrix legs)
+        uses: actions/download-artifact@v4
+        with:
+          pattern: test-evidence-*
+          path: artifacts
+
+      - name: Publish summary comment
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        with:
+          files: "artifacts/**/junit.xml"
+          comment_title: "テスト結果サマリ"

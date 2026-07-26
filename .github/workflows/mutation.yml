@@ -1,0 +1,72 @@
+name: Mutation testing
+
+# mutmutは内部でos.fork()を使用しておりPOSIX専用(Windows非対応、docs/defects.md DEF-003参照)。
+# 実行コストが高いため、通常のCI(ci.yml)とは分離し、main pushと週次・手動実行のみに限定する。
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 18 * * 0" # 毎週日曜 18:00 UTC(日本時間 月曜3:00)
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  mutmut:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: python -m pip install -e ".[dev]"
+
+      - name: Run mutation testing
+        run: mutmut run || true # 生存ミュータントの有無にかかわらずここでは継続し、次段で閾値判定する
+
+      - name: Summarize mutation score
+        id: summary
+        run: |
+          mutmut results --all > mutmut-results.txt || true
+          python - <<'EOF'
+          killed = 0
+          survived = 0
+          with open("mutmut-results.txt", encoding="utf-8") as f:
+              for line in f:
+                  if ": killed" in line:
+                      killed += 1
+                  elif ": survived" in line:
+                      survived += 1
+          total = killed + survived
+          if total == 0:
+              print("ミューテーションが1件も生成されませんでした(設定を確認してください)")
+              raise SystemExit(1)
+          score = killed / total * 100
+          print(f"ミューテーションスコア: {score:.1f}% ({killed}/{total} killed)")
+          with open("mutmut-score.txt", "w", encoding="utf-8") as out:
+              out.write(f"{score:.1f}")
+          EOF
+
+      - name: Upload mutation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-report
+          path: |
+            mutmut-results.txt
+            mutmut-score.txt
+          retention-days: 30
+
+      # 閾値ゲート(目標80%)。
+      # 注記: mutmutはネイティブWindowsで実行不可なためローカル(開発機)では未検証。
+      # このワークフローの初回実行結果を見て、設定に問題が無ければ continue-on-error を外し
+      # 正式なゲートにする(docs/test-report.md 残存リスク参照)。
+      - name: Gate on mutation score threshold (80%)
+        continue-on-error: true
+        run: |
+          score=$(cat mutmut-score.txt)
+          awk -v s="$score" 'BEGIN { exit !(s+0 >= 80) }'

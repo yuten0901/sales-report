@@ -1,0 +1,33 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.env
+
+# テスト・カバレッジ
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+junit.xml
+.hypothesis/
+.mutmut-cache
+html/
+
+# 型チェック
+.mypy_cache/
+.dmypy.json
+
+# エディタ
+.vscode/
+.idea/
+*.swp
+
+# 出力(ローカル実行時の成果物)
+/out/
