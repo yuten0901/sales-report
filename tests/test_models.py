@@ -306,6 +306,26 @@ def test_parse_row_dt1_07_all_fields_invalid() -> None:
     assert len(err.reasons) == 5
 
 
+def test_parse_row_handles_none_values_without_crashing() -> None:
+    """FIX-01/DEF-006: rawの値がNone(csv.DictReaderのrestval未設定時の既定動作)でも
+    クラッシュせず、空文字として扱われ行エラーになること(loaderのrestval設定への
+    依存だけに頼らない、models側の二重の防御策=_get_strを直接検証する)。
+    """
+    raw = {
+        "date": "2026-07-01",
+        "store": "渋谷店",
+        "product": "商品A",
+        "quantity": None,
+        "unit_price": None,
+    }
+    row, err = parse_row(raw, row_number=1)
+    assert row is None
+    assert isinstance(err, RowError)
+    assert len(err.reasons) == 2
+    assert any("quantity" in r for r in err.reasons)
+    assert any("unit_price" in r for r in err.reasons)
+
+
 def test_row_error_reason_summary_joins_all_reasons() -> None:
     err = RowError(row_number=1, raw={}, reasons=("理由A", "理由B"))
     assert err.reason_summary == "理由A; 理由B"

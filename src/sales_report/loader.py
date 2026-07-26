@@ -89,7 +89,9 @@ def load_file(path: Path) -> tuple[list[SaleRow], list[RowError], FileError | No
             reason="文字コードを判定できませんでした(UTF-8/Shift-JISいずれでもデコード失敗)",
         )
 
-    reader = csv.DictReader(io.StringIO(text))
+    # restval=""で列数不足行の欠損値を""にする
+    # (既定Noneだとparse_rowでNone.strip()となりクラッシュする。FIX-01/DEF-006)。
+    reader = csv.DictReader(io.StringIO(text), restval="")
     if reader.fieldnames is None:
         # BV-FILE-01: 空ファイル(0バイト)はヘッダ自体が存在しない。
         return [], [], FileError(

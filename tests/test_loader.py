@@ -155,6 +155,41 @@ def test_load_file_mixed_valid_and_invalid_rows(make_csv) -> None:
     assert errors[1].row_number == 4
 
 
+def test_load_file_short_row_is_recorded_as_error_not_crash(make_csv) -> None:
+    """FIX-01/DEF-006: 列数がヘッダ未満の行(途中で切れたCSV等)でクラッシュせず、
+    行エラーとして記録され、処理は継続すること(1行の事故で全体を止めない、の実例)。
+    """
+    content = (
+        f"{VALID_CSV_HEADER}\n"
+        "2026-07-01,渋谷店,商品A\n"  # quantity/unit_priceが欠落(列数不足)
+        "2026-07-02,新宿店,商品B,2,200\n"  # 後続行は正常に処理される
+    )
+    path = make_csv("short_row.csv", content)
+    rows, errors, file_error = load_file(path)
+    assert file_error is None
+    assert len(rows) == 1
+    assert rows[0].store == "新宿店"
+    assert len(errors) == 1
+    assert errors[0].row_number == 2
+    assert "unit_price" in errors[0].reason_summary
+
+
+def test_load_file_excess_columns_are_ignored_safely(make_csv) -> None:
+    """列数がヘッダより多い行(restkey)は、必須列さえ揃っていれば余分な値を
+    無視して正常に処理されること(csv.DictReaderの既定restkey=Noneキーに吸収される)。
+    """
+    content = (
+        f"{VALID_CSV_HEADER}\n"
+        "2026-07-01,渋谷店,商品A,3,1200,備考,余分\n"
+    )
+    path = make_csv("excess_columns.csv", content)
+    rows, errors, file_error = load_file(path)
+    assert file_error is None
+    assert errors == []
+    assert len(rows) == 1
+    assert rows[0].quantity == 3
+
+
 # --- load_files: 複数ファイルの集約 -----------------------------------------
 
 

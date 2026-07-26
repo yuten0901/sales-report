@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import datetime as dt
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 
@@ -44,7 +45,7 @@ class RowError:
     """検証に失敗した行の情報。理由は複数フィールド分をまとめて保持する。"""
 
     row_number: int
-    raw: dict[str, str]
+    raw: dict[str, str | None]
     reasons: tuple[str, ...]
 
     @property
@@ -101,7 +102,20 @@ def validate_unit_price(value: str) -> tuple[Decimal | None, str | None]:
     return parsed, None
 
 
-def parse_row(raw: dict[str, str], row_number: int) -> tuple[SaleRow | None, RowError | None]:
+def _get_str(raw: Mapping[str, str | None], key: str) -> str:
+    """rawからkeyを文字列として取得する。キー不在/値Noneのいずれも""として扱う。
+
+    列数不足のCSV行はcsv.DictReaderのrestval設定次第でNoneが入り得るため、
+    parse_row側でも防御的にNoneを吸収する(FIX-01/DEF-006。restvalの設定だけに
+    依存しない二重の安全策)。"0"等の偽値文字列は保持するためor演算子は使わない。
+    """
+    value = raw.get(key)
+    return "" if value is None else value
+
+
+def parse_row(
+    raw: Mapping[str, str | None], row_number: int
+) -> tuple[SaleRow | None, RowError | None]:
     """DT-1: CSVの1行(dict)を検証し、SaleRowまたはRowErrorのどちらかを返す。
 
     いずれか1フィールドでも無効なら行全体を無効とし、検出した全ての理由を
@@ -109,23 +123,23 @@ def parse_row(raw: dict[str, str], row_number: int) -> tuple[SaleRow | None, Row
     """
     reasons: list[str] = []
 
-    date_value, date_err = validate_date(raw.get("date", ""))
+    date_value, date_err = validate_date(_get_str(raw, "date"))
     if date_err:
         reasons.append(date_err)
 
-    store_value, store_err = validate_text_field(raw.get("store", ""), "store")
+    store_value, store_err = validate_text_field(_get_str(raw, "store"), "store")
     if store_err:
         reasons.append(store_err)
 
-    product_value, product_err = validate_text_field(raw.get("product", ""), "product")
+    product_value, product_err = validate_text_field(_get_str(raw, "product"), "product")
     if product_err:
         reasons.append(product_err)
 
-    quantity_value, quantity_err = validate_quantity(raw.get("quantity", ""))
+    quantity_value, quantity_err = validate_quantity(_get_str(raw, "quantity"))
     if quantity_err:
         reasons.append(quantity_err)
 
-    price_value, price_err = validate_unit_price(raw.get("unit_price", ""))
+    price_value, price_err = validate_unit_price(_get_str(raw, "unit_price"))
     if price_err:
         reasons.append(price_err)
 
