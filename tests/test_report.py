@@ -144,6 +144,25 @@ def test_render_errors_csv_includes_row_and_file_errors() -> None:
     assert "broken.csv" in content
 
 
+def test_render_errors_csv_sanitizes_file_path_column() -> None:
+    """FIX-07/DEF-007: ファイル名列も含め、理由列と同様にCSVインジェクション
+    対策(サニタイズ)が適用されていること。攻撃者が制御し得るファイル名
+    (`=`始まり等)がpath列に素通しになっていないかを検証する。
+    """
+    file_errors = [FileError(path=Path("=cmd|calc.csv"), reason="文字コード不明")]
+    row_errors = [
+        LoadedRowError(
+            file=Path("+1+1|evil.csv"),
+            row_error=RowError(row_number=2, raw={}, reasons=("storeが空です",)),
+        )
+    ]
+
+    content = render_errors_csv(row_errors, file_errors)
+
+    assert "'=cmd|calc.csv" in content
+    assert "'+1+1|evil.csv" in content
+
+
 def test_has_errors_to_report() -> None:
     assert has_errors_to_report([], []) is False
     row_errors = [

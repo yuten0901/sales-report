@@ -96,17 +96,25 @@ def render_errors_csv(
     row_errors: Sequence[LoadedRowError],
     file_errors: Sequence[FileError],
 ) -> str:
-    """行エラー・ファイルエラーを理由付きでCSV文字列にレンダリングする。"""
+    """行エラー・ファイルエラーを理由付きでCSV文字列にレンダリングする。
+
+    FIX-07/DEF-007: ファイルパス列も含め、全ての文字列セルをsanitize_csv_field()
+    で無害化する。ファイル名は攻撃者が制御し得る値であり(Linux等では`=evil.csv`
+    のようなファイル名も作成可能)、理由列だけを無害化してもパス列が素通しでは
+    CSVインジェクション対策として不完全だった。
+    """
     output = io.StringIO()
     writer = csv.writer(output, lineterminator="\n")
     writer.writerow(["種別", "ファイル", "行番号", "理由"])
     for fe in file_errors:
-        writer.writerow(["ファイルエラー", str(fe.path), "", sanitize_csv_field(fe.reason)])
+        writer.writerow(
+            ["ファイルエラー", sanitize_csv_field(str(fe.path)), "", sanitize_csv_field(fe.reason)]
+        )
     for re_ in row_errors:
         writer.writerow(
             [
                 "行エラー",
-                str(re_.file),
+                sanitize_csv_field(str(re_.file)),
                 re_.row_error.row_number,
                 sanitize_csv_field(re_.row_error.reason_summary),
             ]

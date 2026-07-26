@@ -179,7 +179,7 @@ ID接頭辞 `DT-`。
 | BV-ENC-04 | `tests/test_loader.py` | `test_load_file_undecodable_bytes_becomes_file_error`, `test_load_files_one_broken_file_does_not_stop_others` |
 | BV-ENC-05 | `tests/test_loader.py` | `test_load_file_permission_error_becomes_file_error_not_crash`, `test_load_files_permission_error_on_one_file_does_not_stop_others` |
 | BV-DUP-01 | `tests/test_aggregate.py` | `test_aggregate_duplicate_lines_are_summed` |
-| BV-SEC-01 | `tests/test_report.py` | `test_sanitize_csv_field_neutralizes_dangerous_prefixes[BV-SEC-01-*]`, `test_render_csv_report_sanitizes_dangerous_store_name` |
+| BV-SEC-01 | `tests/test_report.py` | `test_sanitize_csv_field_neutralizes_dangerous_prefixes[BV-SEC-01-*]`, `test_render_csv_report_sanitizes_dangerous_store_name`, `test_render_errors_csv_sanitizes_file_path_column`（FIX-07/DEF-007: パス列も無害化されることの検証） |
 | BV-SEC-02 | `tests/test_report.py` | `test_sanitize_csv_field_leaves_normal_values_untouched[BV-SEC-02-*]` |
 | DT-1-01〜07 | `tests/test_models.py` | `test_parse_row_dt1_01_all_valid` 〜 `test_parse_row_dt1_07_all_fields_invalid`（7関数） |
 | DT-1-08 | `tests/test_loader.py`, `tests/test_models.py` | `test_load_file_short_row_is_recorded_as_error_not_crash`, `test_parse_row_handles_none_values_without_crashing` |
