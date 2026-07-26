@@ -127,7 +127,12 @@ def test_dt3_01_markdown_without_report_errors_skips_error_file(
     output = tmp_path / "out" / "summary.md"
     result = runner.invoke(app, ["--input", str(path), "--output", str(output)])
     assert result.exit_code == EXIT_SUCCESS
-    # --report-errors未指定なのでエラーレポートは作られない。
+    # FIX-10/別コンテキスト指摘: 従来はコメントのみでassertが無く、
+    # 「エラーレポートが作られない」ことを実際には検証していなかった。
+    # --report-errors未指定なので、出力ディレクトリにsummary.md以外の
+    # ファイルが作られていないことを実際に確認する。
+    assert output.exists()
+    assert sorted(p.name for p in output.parent.iterdir()) == ["summary.md"]
 
 
 def test_dt3_02_csv_format_with_report_errors_writes_both_files(

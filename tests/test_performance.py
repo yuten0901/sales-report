@@ -47,8 +47,10 @@ def test_large_input_performance_completes_within_time_budget(tmp_path: Path) ->
     assert len(result.rows) == n_rows
     assert result.row_errors == ()
     assert aggregation.total_quantity > 0
-    # 想定利用規模を大きく超える下限保証。遅くとも30秒以内に完了すること。
-    assert duration < 30.0, f"10万行の処理に{duration:.1f}秒かかった(想定を超過)"
+    # FIX-10/Codex#指摘: 当初は30秒(実測~1秒の30倍)という緩すぎる閾値で、
+    # 回帰が起きても検知できない「通ることが保証された儀式」になっていた。
+    # 実測(このマシンで約0.9秒)に約3倍の余裕を持たせた3秒に厳格化する。
+    assert duration < 3.0, f"10万行の処理に{duration:.1f}秒かかった(想定を超過)"
 
 
 def test_large_input_memory_stays_bounded(tmp_path: Path) -> None:
@@ -69,4 +71,5 @@ def test_large_input_memory_stays_bounded(tmp_path: Path) -> None:
     tracemalloc.stop()
 
     peak_mb = peak / (1024 * 1024)
-    assert peak_mb < 500, f"ピークメモリが{peak_mb:.1f}MBに達した(想定を超過)"
+    # FIX-10: 実測(このマシンで約52MB)に約3倍の余裕を持たせ500MBから150MBに厳格化。
+    assert peak_mb < 150, f"ピークメモリが{peak_mb:.1f}MBに達した(想定を超過)"
