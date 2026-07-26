@@ -28,6 +28,8 @@ from sales_report.models import (
     [
         pytest.param("2026-07-26", dt.date(2026, 7, 26), id="EQ-DATE-01"),
         pytest.param("2000-01-01", dt.date(2000, 1, 1), id="EQ-DATE-01-epoch"),
+        pytest.param("2026/07/26", dt.date(2026, 7, 26), id="B-4-slash"),
+        pytest.param("2026/7/26", dt.date(2026, 7, 26), id="B-4-slash-single-digit"),
     ],
 )
 def test_validate_date_valid(value: str, expected: dt.date) -> None:
@@ -39,13 +41,15 @@ def test_validate_date_valid(value: str, expected: dt.date) -> None:
 @pytest.mark.parametrize(
     "value",
     [
-        pytest.param("2026/07/26", id="EQ-DATE-02-slash"),
         pytest.param("26-07-2026", id="EQ-DATE-02-order"),
         pytest.param("not-a-date", id="EQ-DATE-02-text"),
         pytest.param("", id="EQ-DATE-03-empty"),
         pytest.param("   ", id="EQ-DATE-03-whitespace"),
         pytest.param("2026-02-30", id="EQ-DATE-04-nonexistent"),
         pytest.param("2026-13-01", id="EQ-DATE-04-invalid-month"),
+        pytest.param("26/07/2026", id="B-4-slash-day-first-not-accepted"),
+        pytest.param("2026/13/01", id="B-4-slash-invalid-month"),
+        pytest.param("2026/02/30", id="B-4-slash-nonexistent-day"),
     ],
 )
 def test_validate_date_invalid(value: str) -> None:

@@ -201,3 +201,14 @@
 - **修正**: 調査の結果、現在のテストスイートは日時固定・時刻フリーズを必要としないと判断した（コードが`datetime.now()`等を一切使わずタイムスタンプを出力に埋め込まないため）。順序不変性の検証（`test_property_aggregate_is_order_independent`）も、既にローカルスコープの`random.Random(42)`で決定的にシャッフルしており、グローバルな乱数シード管理は不要だった。よって「実装する」ではなく「実態に合わせてdocstringを訂正し、未使用の`freezegun`を`pyproject.toml`から削除する」を選択した。
 - **検証**: `freezegun`をアンインストールした状態で全159件のテストが引き続き成功することを確認し、真に未使用であったことを実証した。
 - **教訓**: 「あると便利そうだから先に入れておく」依存関係やdocstringの主張は、使われないまま放置されると**嘘のドキュメント**になり、読み手を誤誘導する。使われていない依存は都度削除し、ドキュメントは常に実装と一致させる。
+
+## 設計裁定（A-1/B-4/A-3/fdリーク/durability）の実装記録
+
+Opus再確認レビューで保留にしていた4件の設計判断を確定・実装した（`portfolio-repo-01-fix-spec.md` §5参照）。
+
+- **A-1（ヘッダ正規化）**: CSVヘッダの前後空白・大文字小文字の揺れ（例: ` Date `, `STORE`）を許容するよう`loader.py`を修正した（正規化=`strip()`+`casefold()`のみ）。「売上日→date」のような**意味的なエイリアスは非対応**と明示し、実際に`test_load_file_semantic_alias_header_is_not_accepted`で非対応であることをテスト化した。
+- **B-4（date形式の拡張）**: `YYYY-MM-DD`に加え、日本の業務CSVで多用される`YYYY/MM/DD`（1桁月日も許容）を受理するよう`validate_date`を修正した。日が先に来る`DD/MM/YYYY`形式は引き続き非対応（年が先頭に来る日本語圏の慣習のみ対応）。既存テスト`EQ-DATE-02-slash`（スラッシュ形式を無効と期待していた）を、新仕様に合わせて有効側に移動した。
+- **A-3（非CSV指定の終了コード統一）**: `--input`に非CSVファイルを直接指定した場合、従来はexit 1（ファイルレベルエラー経由）だったが、「ディレクトリにCSVが無い」場合と同じexit 2（usage error）に統一した。同じ「入力の指定ミス」で終了コードが割れていた不整合を解消。
+- **fdリーク（Codex#12a）**: `write_atomic()`で`os.fdopen()`自体が失敗した場合、生のファイルディスクリプタが未クローズのままリークしていた。修正を検証する過程で、**Windowsではリークしたfdがファイルをロックしたままにし、後続の一時ファイル削除(`unlink()`)自体が`PermissionError`で失敗する**という具体的な実害を確認した（想定より深刻な影響だった）。`os.fdopen()`失敗時に`os.close(fd)`を明示的に呼ぶよう修正。
+- **durability主張の弱化（C#12b）**: 「壊れた出力を残さない」という記述が、電源断・OSクラッシュレベルの永続性（fsync）まで保証しているかのように読める箇所が複数あった。実際に保証しているのは「プロセス中断(例外発生)時に中途半端な内容を残さない」ことのみであり、fsyncは未実装（v0.1.0の非目標と判断）。`report.py`・`README.md`・`docs/test-design.md`の記述を、保証範囲を正確に示す表現に修正した。
+- **追加した回帰テスト**: `test_load_file_header_with_mixed_case_is_accepted`、`test_load_file_header_with_surrounding_whitespace_is_accepted`、`test_load_file_semantic_alias_header_is_not_accepted`（A-1）。`B-4-slash`系4件（date系）。`test_discover_csv_files_non_csv_file_returns_empty`、`test_a3_non_csv_file_directly_specified_exits_usage_error`（A-3）。`test_write_atomic_closes_fd_when_fdopen_itself_fails`（fdリーク。修正前コードに戻すと`PermissionError`で失敗することを実際に確認済み）。

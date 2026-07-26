@@ -2,7 +2,8 @@
 
 docs/test-design.md の §1.3(出力仕様) に対応する。
 - **CSVインジェクション対策**(BV-SEC-01/02): `=` `+` `-` `@` /タブ/CRで始まる値を無害化する。
-- **原子的書き込み**: 一時ファイル→os.replace()で、処理中断時に壊れた出力を残さない。
+- **原子的書き込み**: 一時ファイル→os.replace()で、プロセス中断(例外発生)時に
+  中途半端な出力を残さない(fsync等の電源断レベルのdurabilityは対象外。C#12b設計裁定)。
 - レンダリング(render_*)と書き込み(write_atomic)を分離し、レンダリング結果を
   ゴールデンテスト(tests/test_golden.py)で直接比較できるようにしている。
 """
@@ -133,14 +134,27 @@ def has_errors_to_report(
 def write_atomic(path: Path, content: str, encoding: str = "utf-8") -> None:
     """一時ファイルに書き込んでからos.replace()で本番パスに置換する。
 
-    処理中断時(例外発生時)に壊れた/中途半端な出力ファイルを残さないための実装。
-    改行の自動変換を防ぐため newline="" で開く(csv側で\\nに固定済み)。
+    処理が中断(例外発生)した際に、プロセス中断時点で中途半端な内容の出力
+    ファイルを残さないための実装(電源断・OSクラッシュレベルのdurability
+    (fsync)までは対象外。C#12b設計裁定)。改行の自動変換を防ぐため
+    newline="" で開く(csv側で\\nに固定済み)。
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
     tmp_path = Path(tmp_name)
     try:
-        with os.fdopen(fd, "w", encoding=encoding, newline="") as f:
+        try:
+            f = os.fdopen(fd, "w", encoding=encoding, newline="")
+        except BaseException:
+            # C#12a(設計裁定): os.fdopen()自体が失敗した場合、fdはまだファイル
+            # オブジェクトにラップされていないため、明示的にcloseしないと
+            # ファイルディスクリプタがリークする(withブロックの__exit__は
+            # __enter__が失敗すると呼ばれない)。Windowsではリークしたfdが
+            # ファイルをロックしたままにするため、後続のtmp_path.unlink()自体が
+            # PermissionErrorで失敗する実害を確認済み(手動ミューテーションで実測)。
+            os.close(fd)
+            raise
+        with f:
             f.write(content)
         os.replace(tmp_path, path)
     except BaseException:

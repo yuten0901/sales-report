@@ -6,6 +6,7 @@ docs/test-design.md §1.3(原子的書き込み・冪等性)に対応する。
 from __future__ import annotations
 
 from pathlib import Path
+from unittest import mock
 
 import pytest
 from typer.testing import CliRunner
@@ -87,6 +88,35 @@ def test_atomic_write_interruption_when_no_previous_file_leaves_nothing(
     with pytest.raises(OSError, match="シミュレートされた中断"):
         write_atomic(target, "content\n")
 
+    assert not target.exists()
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_write_atomic_closes_fd_when_fdopen_itself_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """C#12a(設計裁定・Codexレビュー指摘): os.fdopen()自体が失敗した場合、
+    まだファイルオブジェクトにラップされていない生のファイルディスクリプタを
+    明示的にos.close()しないとリークする(withブロックの__exit__は__enter__
+    失敗時に呼ばれないため)。os.close()が実際に呼ばれることを検証する。
+    """
+    target = tmp_path / "report.csv"
+    closed_fds: list[int] = []
+    original_close = report_module.os.close
+
+    def spy_close(fd: int) -> None:
+        closed_fds.append(fd)
+        original_close(fd)
+
+    monkeypatch.setattr(
+        report_module.os, "fdopen", mock.Mock(side_effect=LookupError("unknown encoding"))
+    )
+    monkeypatch.setattr(report_module.os, "close", spy_close)
+
+    with pytest.raises(LookupError):
+        write_atomic(target, "content\n")
+
+    assert len(closed_fds) == 1
     assert not target.exists()
     assert list(tmp_path.iterdir()) == []
 

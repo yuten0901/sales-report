@@ -28,6 +28,18 @@ def test_discover_csv_files_single_file(tmp_path: Path, make_csv) -> None:
     assert result == [path]
 
 
+def test_discover_csv_files_non_csv_file_returns_empty(tmp_path: Path) -> None:
+    """A-3(設計裁定): 非CSVファイルを直接指定した場合、「ディレクトリ内に
+    CSVが無い」場合と同じ空リストを返す(呼び出し側でexit 2に統一するため)。
+    修正前は拡張子を見ずそのまま返しファイルレベルエラー経由でexit 1に
+    なっており、同じ「入力の指定ミス」で終了コードが割れていた。
+    """
+    path = tmp_path / "memo.txt"
+    path.write_text("this is not a csv")
+    result = discover_csv_files(path)
+    assert result == []
+
+
 def test_discover_csv_files_directory_finds_only_csv_sorted(tmp_path: Path, make_csv) -> None:
     make_csv("b.csv", f"{VALID_CSV_HEADER}\n")
     make_csv("a.csv", f"{VALID_CSV_HEADER}\n")
@@ -179,6 +191,40 @@ def test_load_file_missing_required_column(make_csv) -> None:
     assert errors == []
     assert isinstance(file_error, FileError)
     assert "unit_price" in file_error.reason
+
+
+def test_load_file_header_with_mixed_case_is_accepted(make_csv) -> None:
+    """A-1(設計裁定): ヘッダの大文字小文字の揺れを許容する(正規化=casefold)。"""
+    content = "Date,Store,Product,Quantity,Unit_Price\n2026-07-01,渋谷店,商品A,3,1200\n"
+    path = make_csv("mixed_case_header.csv", content)
+    rows, errors, file_error = load_file(path)
+    assert file_error is None
+    assert errors == []
+    assert len(rows) == 1
+    assert rows[0].store == "渋谷店"
+
+
+def test_load_file_header_with_surrounding_whitespace_is_accepted(make_csv) -> None:
+    """A-1(設計裁定): ヘッダの前後空白の揺れを許容する(正規化=strip)。"""
+    content = " date , store,product , quantity, unit_price \n2026-07-01,渋谷店,商品A,3,1200\n"
+    path = make_csv("whitespace_header.csv", content)
+    rows, errors, file_error = load_file(path)
+    assert file_error is None
+    assert errors == []
+    assert len(rows) == 1
+    assert rows[0].quantity == 3
+
+
+def test_load_file_semantic_alias_header_is_not_accepted(make_csv) -> None:
+    """A-1(設計裁定・非対応の明示): 「売上日」のような意味的なエイリアスは
+    正規化(strip+casefold)の対象外であり、必須列不足として扱われる。
+    """
+    content = "売上日,store,product,quantity,unit_price\n2026-07-01,渋谷店,商品A,3,1200\n"
+    path = make_csv("alias_header.csv", content)
+    rows, errors, file_error = load_file(path)
+    assert rows == []
+    assert isinstance(file_error, FileError)
+    assert "date" in file_error.reason
 
 
 def test_load_file_mixed_valid_and_invalid_rows(make_csv) -> None:

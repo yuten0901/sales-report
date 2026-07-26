@@ -16,6 +16,12 @@ from decimal import Decimal, InvalidOperation
 
 REQUIRED_COLUMNS: tuple[str, ...] = ("date", "store", "product", "quantity", "unit_price")
 
+# B-4(設計裁定): 日本の業務CSVでは YYYY/MM/DD 形式(Excel既定の日付表示)が
+# 非常に多い。ISO8601(YYYY-MM-DD)のみに限定すると実データで大量の行が
+# 誤スキップされるため、年-月-日の順序を保ったスラッシュ区切りも受理する
+# (日本語圏の慣習に合わせ、年が先頭に来る形式のみ・月/日は1桁も許容)。
+_SLASH_DATE_PATTERN = re.compile(r"^([0-9]{4})/([0-9]{1,2})/([0-9]{1,2})$")
+
 # ASCII半角の整数のみを許可する(全角数字を暗黙に受理するPython標準動作を弾くため)。
 # 注意: `\d` はre.ASCII指定が無いとUnicodeの数字(全角含む)にもマッチしてしまうため、
 # 明示的に[0-9]を使う(このtypoでunit_price側は一度実装バグを埋め込んだ→docs/defects.md参照)。
@@ -62,14 +68,26 @@ class RowError:
 
 
 def validate_date(value: str) -> tuple[dt.date | None, str | None]:
-    """EQ-DATE-01〜04: ISO8601(YYYY-MM-DD)形式のみ有効とする。"""
+    """EQ-DATE-01〜04: ISO8601(YYYY-MM-DD)形式、または日本の業務CSVで多用される
+    YYYY/MM/DD形式(B-4設計裁定)を有効とする。
+    """
     stripped = value.strip()
     if not stripped:
         return None, "dateが空です"
+
+    candidate = stripped
+    slash_match = _SLASH_DATE_PATTERN.match(stripped)
+    if slash_match:
+        year, month, day = slash_match.groups()
+        candidate = f"{year}-{int(month):02d}-{int(day):02d}"
+
     try:
-        return dt.date.fromisoformat(stripped), None
+        return dt.date.fromisoformat(candidate), None
     except ValueError:
-        return None, f"dateの形式が不正です(YYYY-MM-DD形式で指定してください): '{stripped}'"
+        return None, (
+            f"dateの形式が不正です(YYYY-MM-DDまたはYYYY/MM/DD形式で"
+            f"指定してください): '{stripped}'"
+        )
 
 
 def validate_text_field(value: str, field_name: str) -> tuple[str | None, str | None]:

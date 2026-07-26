@@ -41,6 +41,17 @@ def test_dt2_02_directory_without_csv_exits_usage_error(tmp_path: Path) -> None:
     assert result.exit_code == EXIT_USAGE_ERROR
 
 
+def test_a3_non_csv_file_directly_specified_exits_usage_error(tmp_path: Path) -> None:
+    """A-3(設計裁定): 非CSVファイルを--inputに直接指定した場合も、
+    「ディレクトリにCSVが無い」場合と同じexit 2(usage error)になること
+    (修正前はexit 1になっており、同じ入力ミスで終了コードが割れていた)。
+    """
+    path = tmp_path / "memo.txt"
+    path.write_text("this is not a csv")
+    result = runner.invoke(app, ["--input", str(path)])
+    assert result.exit_code == EXIT_USAGE_ERROR
+
+
 def test_dt2_03_zero_valid_rows_exits_no_data(tmp_path: Path, make_csv) -> None:
     path = make_csv("empty_data.csv", f"{VALID_CSV_HEADER}\n")  # ヘッダのみ
     output = tmp_path / "out" / "summary.md"

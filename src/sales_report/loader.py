@@ -59,7 +59,14 @@ def discover_csv_files(input_path: Path) -> list[Path]:
         msg = f"入力パスが存在しません: {input_path}"
         raise FileNotFoundError(msg)
     if input_path.is_file():
-        return [input_path]
+        # A-3(設計裁定): 非CSVファイルを直接指定した場合、「ディレクトリ内に
+        # CSVが無い」場合と同じ扱い(空リスト→呼び出し側でexit 2)に統一する。
+        # 修正前はここで拡張子を見ずにそのまま返し、ファイルレベルエラーを
+        # 経由してexit 1(有効明細0件)になっていた。同じ「入力の指定ミス」
+        # なのに終了コードが割れていた不整合を解消する。
+        if input_path.suffix.lower() == ".csv":
+            return [input_path]
+        return []
     return sorted(p for p in input_path.iterdir() if p.is_file() and p.suffix.lower() == ".csv")
 
 
@@ -110,7 +117,14 @@ def load_file(path: Path) -> tuple[list[SaleRow], list[RowError], FileError | No
             reason="ヘッダー行が見つかりません(空ファイルの可能性があります)",
         )
 
-    missing = set(REQUIRED_COLUMNS) - set(reader.fieldnames)
+    # A-1(設計裁定): ヘッダの前後空白・大文字小文字の揺れを許容する
+    # (正規化=strip+casefoldのみ。「売上日→date」等の意味的なエイリアスは
+    # 非対応・README/残存リスクに明記)。正規化後の列名から元の列名への
+    # 対応表を作り、各行で必須列だけを正規化済みキーとして取り出す。
+    normalized_to_raw = {
+        name.strip().casefold(): name for name in reader.fieldnames if name is not None
+    }
+    missing = set(REQUIRED_COLUMNS) - set(normalized_to_raw)
     if missing:
         return [], [], FileError(
             path=path,
@@ -121,7 +135,8 @@ def load_file(path: Path) -> tuple[list[SaleRow], list[RowError], FileError | No
     errors: list[RowError] = []
     # ヘッダが1行目のため、データ行は2行目から(行番号を実ファイルと一致させる)。
     for row_number, raw in enumerate(reader, start=2):
-        row, err = parse_row(raw, row_number=row_number)
+        translated = {col: raw.get(normalized_to_raw[col], "") for col in REQUIRED_COLUMNS}
+        row, err = parse_row(translated, row_number=row_number)
         if row is not None:
             rows.append(row)
         if err is not None:
