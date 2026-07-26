@@ -13,8 +13,10 @@
 | `date` | 日付文字列 | `YYYY-MM-DD` 形式のみ有効 |
 | `store` | 文字列 | 前後空白を除去して非空であること |
 | `product` | 文字列 | 前後空白を除去して非空であること |
-| `quantity` | 整数 | **ASCII半角数字のみ**を10進整数として解釈、かつ **0以上**（0は有効＝境界値、負は無効） |
-| `unit_price` | 10進数（Decimal） | **ASCII半角数字のみ**を数値として解釈、かつ **0以上**（0は有効＝境界値、負は無効） |
+| `quantity` | 整数 | **ASCII半角数字のみ**を10進整数として解釈、**0以上**（0は有効＝境界値、負は無効）、**桁数9桁まで（10億未満）** |
+| `unit_price` | 10進数（Decimal） | **ASCII半角数字のみ**を数値として解釈、**0以上**（0は有効＝境界値、負は無効）、**整数部12桁まで・小数部2桁まで（銭単位）** |
+
+> **金額仕様の追加（2026-07-26・FIX-04/DEF-010）**: 既定のDecimalコンテキストは精度28桁しかなく、桁数を無制限にすると、大桁の値や大量行の合算で**例外なく丸め誤差が発生する**（Codexレビューが単価29桁×数量9の掛け算で実測: 得られた値と正しい値が9円ずれた）。業務データとして現実的な範囲（quantity 9桁・unit_price 整数部12桁+小数部2桁）に入力段階で制限し、超過は行エラーとする。あわせて`aggregate()`は`decimal.localcontext(prec=50)`で実行し、上限値を大量合算しても丸めが起きない余裕を持たせる（実測: 上限値ぎりぎりの明細を100,001件合算すると既定精度28桁では丸め誤差が発生し、50桁では発生しないことを確認済み）。
 
 > ⚠️ **実装前の仕様確認で発見した非自明な挙動**: Python標準の `int()` / `decimal.Decimal()` は**全角数字を暗黙に受理する**（例: `int('５') == 5`）。対策しないと「全角数字は無効」という意図（EQ-QTY-02, EQ-PRICE-02）に反し、意図せず緩いバリデーションになる。→ **ASCII半角のみを許可する明示チェックを追加**する（`docs/defects.md` に記録）。
 
@@ -88,10 +90,12 @@ ID接頭辞 `BV-`。
 |---|---|---|---|
 | BV-QTY-01 | quantity | `0` | **有効**（金額0円として集計） |
 | BV-QTY-02 | quantity | `-1`（0未満） | 無効 |
-| BV-QTY-03 | quantity | 非常に大きい整数（例 `1000000`） | 有効・オーバーフローしない |
+| BV-QTY-03 | quantity | 大きい整数（例 `1000000`） | 有効・オーバーフローしない |
+| BV-QTY-04 | quantity | 桁数9桁（`999999999`）/ 10桁（`1000000000`） | 9桁＝有効境界、10桁＝無効（FIX-04/DEF-010: 桁数上限） |
 | BV-PRICE-01 | unit_price | `0` | **有効**（金額0円として集計） |
 | BV-PRICE-02 | unit_price | `-0.01`（0未満） | 無効 |
-| BV-PRICE-03 | unit_price | 小数点以下が長い値（例 `100.999`） | Decimalで正確に計算・丸め誤差なし |
+| BV-PRICE-03 | unit_price | 小数点以下がある値（例 `100.99`） | Decimalで正確に計算・丸め誤差なし |
+| BV-PRICE-04 | unit_price | 整数部12桁（有効）/13桁（無効）、小数部2桁（有効）/3桁（無効） | FIX-04/DEF-010: 桁数上限（既定Decimalコンテキストの精度28桁による丸め誤差を防ぐ） |
 | BV-FILE-01 | ファイル | 0バイト（空ファイル） | 有効行0件 → exit 1 |
 | BV-FILE-02 | ファイル | ヘッダ行のみ（データ0行） | 有効行0件 → exit 1 |
 | BV-FILE-03 | ファイル | データ1行のみ | 正しく単一集計 |
@@ -161,7 +165,9 @@ ID接頭辞 `DT-`。
 | EQ-QTY-01〜04 | `tests/test_models.py` | `test_validate_quantity_valid[EQ-QTY-01*]`, `test_validate_quantity_invalid[EQ-QTY-02*/03*/04*]`, `test_validate_quantity_rejects_fullwidth_explicitly` |
 | EQ-PRICE-01〜03 | `tests/test_models.py` | `test_validate_unit_price_valid[EQ-PRICE-01*]`, `test_validate_unit_price_invalid[EQ-PRICE-02*/03*]` |
 | BV-QTY-01〜03 | `tests/test_models.py`, `tests/test_aggregate.py` | `test_validate_quantity_valid[BV-QTY-01-zero/BV-QTY-03-large]`, `test_validate_quantity_invalid[BV-QTY-02*]`, `test_sale_row_amount_zero_quantity_is_zero_yen`, `test_aggregate_boundary_zero_quantity_and_zero_price` |
+| BV-QTY-04 | `tests/test_models.py` | `test_validate_quantity_valid[BV-QTY-04-max-digits-ok]`, `test_validate_quantity_invalid[BV-QTY-04-exceeds-max-digits]` |
 | BV-PRICE-01〜03 | `tests/test_models.py`, `tests/test_aggregate.py` | `test_validate_unit_price_valid[BV-PRICE-01-zero/BV-PRICE-03-precise]`, `test_validate_unit_price_invalid[BV-PRICE-02*]`, `test_sale_row_amount_no_rounding_error_on_repeated_addition`, `test_aggregate_precise_decimal_no_rounding_error` |
+| BV-PRICE-04 | `tests/test_models.py`, `tests/test_aggregate.py` | `test_validate_unit_price_valid[BV-PRICE-04-max-integer-digits-ok]`, `test_validate_unit_price_invalid[BV-PRICE-04-exceeds-*]`, `test_aggregate_no_rounding_at_large_scale_with_default_28_digit_precision_would_fail` |
 | BV-FILE-01 | `tests/test_loader.py` | `test_load_file_empty_file_is_file_error` |
 | BV-FILE-02 | `tests/test_loader.py`, `tests/test_cli.py` | `test_load_file_header_only_returns_empty_without_file_error`, `test_dt2_03_zero_valid_rows_exits_no_data` |
 | BV-FILE-03 | `tests/test_loader.py`, `tests/test_cli.py` | `test_load_file_single_row`, `test_bv_file_03_single_row_succeeds` |

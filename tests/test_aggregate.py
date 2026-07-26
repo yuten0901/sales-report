@@ -116,3 +116,40 @@ def test_aggregate_precise_decimal_no_rounding_error() -> None:
     rows = [_row(quantity=3, unit_price="100.999")]
     result = aggregate(rows)
     assert result.total_amount == Decimal("302.997")
+
+
+def test_aggregate_no_rounding_at_large_scale_with_default_28_digit_precision_would_fail() -> None:
+    """FIX-04/DEF-010: 既定のDecimalコンテキスト(精度28桁)では、大量の高額行を
+    合算すると例外なく丸め誤差が発生する(Codexレビューが実測で指摘)。
+
+    入力バリデーションの桁数上限(models.py: unit_price整数部12桁・quantity9桁)
+    ぎりぎりの値を100,001件合算する。この件数は「デフォルト精度28桁では
+    ちょうど丸め誤差が発生し、高精度(50桁)コンテキストでは発生しない」という
+    閾値を二分探索で特定したもの(n=100,000は一致・n=100,001から不一致になる)。
+    aggregate()が内部でlocalcontext(prec=50)を使っていることの直接的な証明。
+    """
+    max_price = Decimal("999999999999.99")  # 整数部12桁の上限値
+    max_quantity = 999999999  # 9桁の上限値
+    n = 100_001
+
+    rows = [
+        _row(
+            date="2026-01-01",
+            store="S",
+            product="P",
+            quantity=max_quantity,
+            unit_price=str(max_price),
+        )
+        for _ in range(n)
+    ]
+
+    # 期待値は整数演算(cents単位)で丸め無しに算出する、丸めから独立した真のオラクル。
+    # Decimalの除算は既定コンテキストで丸められ得るため、文字列組み立てで
+    # Decimal化する(除算を一切使わない)。
+    per_row_cents = int(max_price * 100) * max_quantity
+    expected_cents = per_row_cents * n
+    expected = Decimal(f"{expected_cents // 100}.{expected_cents % 100:02d}")
+
+    result = aggregate(rows)
+
+    assert result.total_amount == expected

@@ -12,7 +12,7 @@ import datetime as dt
 from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import Decimal, localcontext
 
 from sales_report.models import SaleRow
 
@@ -65,16 +65,24 @@ def aggregate(rows: Sequence[SaleRow]) -> AggregationResult:
     total_quantity = 0
     total_amount = Decimal("0")
 
-    for row in rows:
-        amount = row.amount
-        store_qty[row.store] += row.quantity
-        store_amt[row.store] += amount
-        product_qty[row.product] += row.quantity
-        product_amt[row.product] += amount
-        date_qty[row.date] += row.quantity
-        date_amt[row.date] += amount
-        total_quantity += row.quantity
-        total_amount += amount
+    # FIX-04/DEF-010: 既定のDecimalコンテキストは精度28桁しかなく、大桁の値や
+    # 大量行の合算で例外なく丸め誤差が生じ得る(Codexレビューが9桁の単価×9で
+    # 実測)。集計処理全体を高精度コンテキスト(50桁)で実行し、入力段階の
+    # 桁数上限(models.py参照)を全件合算しても丸めが起きない余裕を持たせる。
+    # localcontext()はwithブロック内でのみ有効で、グローバルなDecimalコンテキストは
+    # 変更しない(他コードへの副作用が無い)。
+    with localcontext() as ctx:
+        ctx.prec = 50
+        for row in rows:
+            amount = row.amount
+            store_qty[row.store] += row.quantity
+            store_amt[row.store] += amount
+            product_qty[row.product] += row.quantity
+            product_amt[row.product] += amount
+            date_qty[row.date] += row.quantity
+            date_amt[row.date] += amount
+            total_quantity += row.quantity
+            total_amount += amount
 
     by_store = tuple(
         StoreSummary(store=key, quantity=store_qty[key], amount=store_amt[key])

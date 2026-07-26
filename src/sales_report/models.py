@@ -23,6 +23,14 @@ _ASCII_INT_PATTERN = re.compile(r"^[+-]?[0-9]+$")
 # ASCII半角の10進数のみを許可する(全角・指数表記なども弾く単純な形式)。
 _ASCII_DECIMAL_PATTERN = re.compile(r"^[+-]?([0-9]+\.?[0-9]*|\.[0-9]+)$")
 
+# FIX-04/DEF-010: 桁数の上限。既定のDecimalコンテキストは精度28桁しかなく、
+# 上限を設けないと大桁の値で例外なく丸め誤差が発生する(9桁の単価×9で
+# 実際に9円ずれることをCodexレビューが実測で指摘した)。入力段階で現実的な
+# 業務データの範囲に制限することで、この問題を未然に防ぐ。
+_MAX_QUANTITY_DIGITS = 9  # 10億未満(最大999,999,999)
+_MAX_PRICE_INTEGER_DIGITS = 12  # 最大999,999,999,999円
+_MAX_PRICE_DECIMAL_DIGITS = 2  # 円未満は銭単位(2桁)まで
+
 
 @dataclass(frozen=True, slots=True)
 class SaleRow:
@@ -73,7 +81,7 @@ def validate_text_field(value: str, field_name: str) -> tuple[str | None, str | 
 
 
 def validate_quantity(value: str) -> tuple[int | None, str | None]:
-    """EQ-QTY-*, BV-QTY-*: ASCII半角の整数(0以上)のみ有効とする。"""
+    """EQ-QTY-*, BV-QTY-*: ASCII半角の整数(0以上・桁数上限内)のみ有効とする。"""
     stripped = value.strip()
     if not stripped:
         return None, "quantityが空です"
@@ -82,11 +90,17 @@ def validate_quantity(value: str) -> tuple[int | None, str | None]:
     parsed = int(stripped)
     if parsed < 0:
         return None, f"quantityは0以上で指定してください: '{stripped}'"
+    if len(str(parsed)) > _MAX_QUANTITY_DIGITS:
+        # FIX-04/DEF-010: 既定Decimalコンテキスト(精度28桁)での丸め誤差を防ぐため、
+        # 業務データとして現実的な範囲に制限する(桁数上限は上のモジュール定数参照)。
+        return None, (
+            f"quantityの桁数が上限({_MAX_QUANTITY_DIGITS}桁)を超えています: '{stripped}'"
+        )
     return parsed, None
 
 
 def validate_unit_price(value: str) -> tuple[Decimal | None, str | None]:
-    """EQ-PRICE-*, BV-PRICE-*: ASCII半角の10進数(0以上)のみ有効とする。"""
+    """EQ-PRICE-*, BV-PRICE-*: ASCII半角の10進数(0以上・桁数上限内)のみ有効とする。"""
     stripped = value.strip()
     if not stripped:
         return None, "unit_priceが空です"
@@ -99,6 +113,23 @@ def validate_unit_price(value: str) -> tuple[Decimal | None, str | None]:
         return None, f"unit_priceが数値として解釈できません: '{stripped}'"
     if parsed < 0:
         return None, f"unit_priceは0以上で指定してください: '{stripped}'"
+
+    # FIX-04/DEF-010: 整数部・小数部それぞれの桁数上限を検査する。
+    # 検証済みの文字列(_ASCII_DECIMAL_PATTERNでASCII数字のみと保証済み)から直接
+    # 桁数を数える(Decimal.as_tuple()は正規化により末尾ゼロの扱いが変わるため使わない)。
+    unsigned = stripped.lstrip("+-")
+    integer_part, _, decimal_part = unsigned.partition(".")
+    integer_part = integer_part or "0"
+    if len(integer_part) > _MAX_PRICE_INTEGER_DIGITS:
+        return None, (
+            f"unit_priceの整数部の桁数が上限({_MAX_PRICE_INTEGER_DIGITS}桁)"
+            f"を超えています: '{stripped}'"
+        )
+    if len(decimal_part) > _MAX_PRICE_DECIMAL_DIGITS:
+        return None, (
+            f"unit_priceの小数部の桁数が上限({_MAX_PRICE_DECIMAL_DIGITS}桁)"
+            f"を超えています: '{stripped}'"
+        )
     return parsed, None
 
 

@@ -95,6 +95,7 @@ def test_validate_text_field_invalid(value: str) -> None:
         pytest.param("1000000", 1000000, id="BV-QTY-03-large"),
         pytest.param("  7  ", 7, id="EQ-QTY-01-strip"),
         pytest.param("+3", 3, id="EQ-QTY-01-explicit-plus"),
+        pytest.param("999999999", 999999999, id="BV-QTY-04-max-digits-ok"),
     ],
 )
 def test_validate_quantity_valid(value: str, expected: int) -> None:
@@ -112,6 +113,7 @@ def test_validate_quantity_valid(value: str, expected: int) -> None:
         pytest.param("", id="EQ-QTY-04-empty"),
         pytest.param("-1", id="BV-QTY-02-negative"),
         pytest.param("-100", id="BV-QTY-02-negative-large"),
+        pytest.param("1000000000", id="BV-QTY-04-exceeds-max-digits"),
     ],
 )
 def test_validate_quantity_invalid(value: str) -> None:
@@ -142,7 +144,10 @@ def test_validate_quantity_rejects_fullwidth_explicitly() -> None:
         pytest.param("1200", Decimal("1200"), id="EQ-PRICE-01-int"),
         pytest.param("1200.50", Decimal("1200.50"), id="EQ-PRICE-01-decimal"),
         pytest.param("0", Decimal("0"), id="BV-PRICE-01-zero"),
-        pytest.param("100.999", Decimal("100.999"), id="BV-PRICE-03-precise"),
+        pytest.param("100.99", Decimal("100.99"), id="BV-PRICE-03-precise"),
+        pytest.param(
+            "999999999999", Decimal("999999999999"), id="BV-PRICE-04-max-integer-digits-ok"
+        ),
     ],
 )
 def test_validate_unit_price_valid(value: str, expected: Decimal) -> None:
@@ -160,6 +165,8 @@ def test_validate_unit_price_valid(value: str, expected: Decimal) -> None:
         pytest.param("", id="EQ-PRICE-03-empty"),
         pytest.param("-0.01", id="BV-PRICE-02-negative"),
         pytest.param("-100", id="BV-PRICE-02-negative-large"),
+        pytest.param("100.999", id="BV-PRICE-04-exceeds-decimal-digits"),
+        pytest.param("9999999999999", id="BV-PRICE-04-exceeds-integer-digits"),
     ],
 )
 def test_validate_unit_price_invalid(value: str) -> None:
