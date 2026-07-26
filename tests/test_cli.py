@@ -155,6 +155,52 @@ def test_dt3_04_invalid_format_exits_usage_error(
     assert result.exit_code == EXIT_USAGE_ERROR
 
 
+# --- DT-2-06: 書込失敗(FIX-02/DEF-008) ---------------------------------------
+
+
+def test_dt2_06_output_write_failure_exits_usage_error_not_no_data(
+    tmp_path: Path, make_csv, valid_csv_content: str
+) -> None:
+    """FIX-02/DEF-008: 出力先に書き込めない場合はexit 2(入力・利用方法エラー)。
+
+    exit 1(=有効明細0件)と衝突させない。修正前は生のOSErrorがtracebackとして
+    表示されexit 1になっていた(cronで「データが無かっただけ」と誤認される)。
+    """
+    path = make_csv("all_valid.csv", valid_csv_content)
+    # 出力先の親ディレクトリの位置に、あえて通常ファイルを置いて書込不可の状況を作る。
+    blocker = tmp_path / "blocker"
+    blocker.write_text("this is a file, not a directory")
+    output = blocker / "summary.md"
+
+    result = runner.invoke(app, ["--input", str(path), "--output", str(output)])
+    assert result.exit_code == EXIT_USAGE_ERROR
+    assert result.exit_code != EXIT_NO_DATA
+
+
+def test_dt2_06_report_errors_write_failure_exits_usage_error(
+    tmp_path: Path, make_csv
+) -> None:
+    """--report-errorsの書込失敗も同様にexit 2になること。"""
+    content = (
+        f"{VALID_CSV_HEADER}\n"
+        "2026-07-01,渋谷店,商品A,3,1200\n"
+        "invalid-date,渋谷店,商品B,1,500\n"
+    )
+    path = make_csv("mixed.csv", content)
+    output = tmp_path / "out" / "summary.md"
+    blocker = tmp_path / "blocker"
+    blocker.write_text("this is a file, not a directory")
+    errors_output = blocker / "errors.csv"
+
+    result = runner.invoke(
+        app,
+        ["--input", str(path), "--output", str(output), "--report-errors", str(errors_output)],
+    )
+    assert result.exit_code == EXIT_USAGE_ERROR
+    # サマリレポート自体は正常に出力されている(部分的成功→エラーレポート書込のみ失敗)。
+    assert output.exists()
+
+
 # --- 構造化ログ -------------------------------------------------------------
 
 

@@ -131,6 +131,7 @@ ID接頭辞 `DT-`。
 | DT-2-03 | 存在する | 発見 | 0件(空/ヘッダのみ/全行無効) | `1` |
 | DT-2-04 | 存在する | 発見 | 1件以上（一部無効行あり） | `0`（かつ`--report-errors`指定時はエラーレポート出力） |
 | DT-2-05 | 存在する | 発見 | 全行有効 | `0` |
+| DT-2-06 | 存在する | 発見 | 1件以上（出力先に書込不可） | `2`（FIX-02/DEF-008: 修正前は生のOSErrorが伝播しexit `1`になっていた。`1`は「有効明細0件」の意味と衝突しcronでの誤認を招くため`2`に統一） |
 
 ### DT-3: 出力オプションの組み合わせ
 
@@ -170,6 +171,7 @@ ID接頭辞 `DT-`。
 | DT-1-08 | `tests/test_loader.py`, `tests/test_models.py` | `test_load_file_short_row_is_recorded_as_error_not_crash`, `test_parse_row_handles_none_values_without_crashing` |
 | DT-1-09 | `tests/test_loader.py` | `test_load_file_excess_columns_are_ignored_safely` |
 | DT-2-01〜05 | `tests/test_cli.py` | `test_dt2_01_nonexistent_input_path_exits_usage_error` 〜 `test_dt2_05_all_valid_rows_exits_success`（5関数） |
+| DT-2-06 | `tests/test_cli.py` | `test_dt2_06_output_write_failure_exits_usage_error_not_no_data`, `test_dt2_06_report_errors_write_failure_exits_usage_error` |
 | DT-3-01〜04 | `tests/test_cli.py` | `test_dt3_01_markdown_without_report_errors_skips_error_file` 〜 `test_dt3_04_invalid_format_exits_usage_error`（4関数） |
 | （性質検証・6性質） | `tests/test_properties.py` | `test_property_total_amount_equals_sum_of_{store,product,date}_amounts`, `test_property_total_quantity_equals_sum_of_store_quantities`, `test_property_aggregate_is_order_independent`, `test_property_no_negative_amounts_when_inputs_nonnegative` |
 | （出力回帰） | `tests/test_golden.py` | `test_golden_csv_report_matches_reference`, `test_golden_markdown_report_matches_reference` |

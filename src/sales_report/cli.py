@@ -92,7 +92,13 @@ def main(
     content = (
         render_csv_report(aggregation) if format == "csv" else render_markdown_report(aggregation)
     )
-    write_atomic(output, content)
+    try:
+        write_atomic(output, content)
+    except OSError as e:
+        # FIX-02/DEF-008: 書込失敗はexit 1(=有効明細0件)と衝突させず、
+        # 入力・利用方法エラーとしてexit 2にする(cronでの誤認を防ぐ)。
+        typer.echo(f"出力先に書き込めませんでした({output}): {e}", err=True)
+        raise typer.Exit(EXIT_USAGE_ERROR) from e
     typer.echo(f"サマリレポートを出力しました: {output}")
 
     if result.row_errors:
@@ -100,7 +106,13 @@ def main(
 
     if report_errors is not None and has_errors_to_report(result.row_errors, result.file_errors):
         errors_content = render_errors_csv(result.row_errors, result.file_errors)
-        write_atomic(report_errors, errors_content)
+        try:
+            write_atomic(report_errors, errors_content)
+        except OSError as e:
+            typer.echo(
+                f"エラーレポートの出力先に書き込めませんでした({report_errors}): {e}", err=True
+            )
+            raise typer.Exit(EXIT_USAGE_ERROR) from e
         typer.echo(f"エラーレポートを出力しました: {report_errors}")
 
     if slack_webhook:

@@ -10,6 +10,7 @@
 | DEF-004 | ブランチ名が`master`なのにCIトリガーが`main`指定＝CIが一切起動しない | **高**(品質ゲートが全て無効化される) |
 | DEF-005 | テスト設計書のトレーサビリティ表に、実在しないテスト関数名が記載されていた | 中(ドキュメント不整合・成果物の信頼性を損なう) |
 | DEF-006 | 列数がヘッダ未満のCSV行でクラッシュする（`None.strip()`のAttributeError） | **高**(看板機能「1行の事故で全体を止めない」が破綻。カバレッジ100%でも未検出) |
+| DEF-008 | 書込失敗時、設計書が約束したexit 2にならず生tracebackでexit 1になる | **高**(exit 1は「有効明細0件」の意味と衝突。cronでの誤認を招く) |
 
 ---
 
@@ -79,3 +80,15 @@
 - **修正（二重の防御）**: ①`loader.py`の`csv.DictReader`に`restval=""`を指定し、列数不足時の欠損値を`None`ではなく`""`にする。②`models.py`に`_get_str()`ヘルパーを追加し、`raw.get(key)`が`None`を返した場合も`""`として扱う防御を`parse_row`内に実装（loaderの`restval`設定だけに依存しない二重の安全策）。
 - **追加した回帰テスト**: `tests/test_loader.py::test_load_file_short_row_is_recorded_as_error_not_crash`（列数不足行が行エラーとして記録され後続行の処理が継続すること）、`tests/test_loader.py::test_load_file_excess_columns_are_ignored_safely`（列数過剰行は安全に無視されること）、`tests/test_models.py::test_parse_row_handles_none_values_without_crashing`（`_get_str`の防御を直接検証）。**修正前コードに戻して両テストが実際に赤（AttributeError）になることを確認済み**。
 - **教訓**: 「カバレッジ100%」は同値クラスとして存在する分岐が全て通ったことしか意味しない。**そもそもテスト設計の観点自体に存在しない同値クラス（フィールドの欠落）はカバレッジで検出できない**。`docs/test-design.md` DT-1に「フィールドの存在有無」という軸を追加した。
+
+## DEF-008: 書込失敗時、設計書が約束したexit 2にならない（別コンテキストレビューが指摘）
+
+- **発見日**: 2026-07-26
+- **検出手段**: 公開前の別コンテキストOpusレビュー。実機で「出力先の親ディレクトリが書込不可（既存ファイルのパス）」を再現し発見。
+- **再現手順**: `--output`に、親ディレクトリの位置に通常ファイルが存在するパスを指定する（例: `blocker`という名前のファイルがある状態で`--output blocker/summary.md`）。
+- **期待**: `docs/test-design.md` §1.4 と README で明記した「出力先に書き込めない → exit 2（入力・利用方法エラー）」という終了コードの契約どおりに動作する。
+- **実際**: `write_atomic`の呼び出しが`try`で囲まれておらず、生の`OSError`（Windowsでは`FileExistsError [WinError 183]`）がそのままCLIの外まで伝播し、typerが自動的にtracebackを表示したうえで**exit 1**（有効明細0件の意味）で終了していた。cron等の自動化から呼び出した場合、「書込に失敗した」という重大な事象が「処理対象データが無かっただけ」という軽微な事象として誤認・黙殺される。
+- **原因分析**: `cli.py`内の2箇所（サマリレポート・エラーレポートそれぞれの`write_atomic`呼び出し）で、ファイルI/Oが失敗し得るという前提が実装時に考慮されていなかった。設計書に明記した終了コードの契約と実装が一致しているかを、実際に書込失敗を発生させて確認する検証が抜けていた。
+- **修正**: `cli.py`の両方の`write_atomic`呼び出しを`try/except OSError`で囲み、ユーザー向けメッセージを表示したうえで`typer.Exit(EXIT_USAGE_ERROR)`（exit 2）を送出するように変更。
+- **追加した回帰テスト**: `tests/test_cli.py::test_dt2_06_output_write_failure_exits_usage_error_not_no_data`、`test_dt2_06_report_errors_write_failure_exits_usage_error`。両テストとも、出力先の親ディレクトリの位置に通常ファイルを配置することで実際の書込失敗を再現している（モックではなく実ファイルシステムでの検証）。**修正前コードに戻すと`exit_code == 1`かつ生の`FileExistsError`が露出することを確認済み**。
+- **教訓**: 設計書に書いた「終了コードの契約」は、それを破る具体的な入力（この場合は書込不可のパス）を用意して実際に検証するまで、本当に守られているか分からない。ドキュメントの記述と実装の一致は、DEF-005（トレーサビリティ表の乖離）と同種の「書いた≠実装されている」問題である。
