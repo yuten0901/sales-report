@@ -31,6 +31,16 @@ def send_slack_summary(webhook_url: str, result: AggregationResult, timeout: flo
     try:
         response = requests.post(webhook_url, json=payload, timeout=timeout)
         response.raise_for_status()
+    except requests.HTTPError as e:
+        # FIX-05/DEF-011: Webhook URL自体が秘密情報であり、requestsの例外文字列に
+        # URL(トークン含む)が含まれ得るため、そのまま{e}を出さずステータスコード
+        # のみを表示する。元例外は`raise ... from e`でチェーンとして保持する
+        # (Pythonのtracebackには残るが、ユーザー向け表示メッセージには出さない)。
+        status = e.response.status_code if e.response is not None else "unknown"
+        msg = f"Slackへの通知に失敗しました(HTTPステータス: {status})"
+        raise NotifyError(msg) from e
     except requests.RequestException as e:
-        msg = f"Slackへの通知に失敗しました: {e}"
+        # 接続エラー・タイムアウト等。requestsの例外文字列には接続先URLが
+        # 含まれ得るため、種別名のみを表示しURLを露出させない。
+        msg = f"Slackへの通知に失敗しました({type(e).__name__})"
         raise NotifyError(msg) from e

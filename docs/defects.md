@@ -13,6 +13,7 @@
 | DEF-008 | 書込失敗時、設計書が約束したexit 2にならず生tracebackでexit 1になる | **高**(exit 1は「有効明細0件」の意味と衝突。cronでの誤認を招く) |
 | DEF-009 | 入力=出力を指定すると、正常終了のまま元データがサマリで上書きされ消える | **最高**(サイレントなデータ損失。Sonnetの探索的テストが「安全」と誤判定していた) |
 | DEF-010 | 桁数無制限のためDecimal既定精度28桁を超えると例外なく金額が誤計算される | **高**(金額ツールとして致命的観点。例外・警告が一切出ない) |
+| DEF-011 | Slack Webhook URL(秘密情報)がエラーメッセージ経由でログに漏洩する | **高**(URL自体がcredential。stderr/CIログへの露出はSlackアカウント乗っ取りに繋がり得る) |
 
 ---
 
@@ -120,3 +121,15 @@
 - **修正（2段構え）**: ①入力段階で桁数上限を設ける — `unit_price`は整数部12桁・小数部2桁まで、`quantity`は9桁（10億未満）までとし、超過は行エラーとして拒否する（`models.py`の`validate_quantity`/`validate_unit_price`）。②`aggregate()`全体を`decimal.localcontext()`で精度50桁に引き上げて実行し、桁数上限ぎりぎりの明細を大量に合算しても丸めが起きない余裕を持たせる（`with`ブロック内のみ有効で、他コードへの副作用は無い）。
 - **追加した回帰テスト**: `tests/test_models.py`に桁数境界のテスト（quantity 9桁OK/10桁NG、unit_price整数部12桁OK/13桁NG、小数部2桁OK/3桁NG）。`tests/test_aggregate.py::test_aggregate_no_rounding_at_large_scale_with_default_28_digit_precision_would_fail`は、桁数上限ぎりぎりの値を100,001件（二分探索で特定した閾値）合算し、整数演算による丸め無しの真値と一致することを検証する。**`aggregate()`から`localcontext(prec=50)`を外すと実際にこのテストが赤になる（丸め誤差が発生する）ことを確認済み**。
 - **教訓**: 「Decimalを使っている」ことと「Decimalなら常に正確」は別。有限精度のコンテキストを持つ以上、桁数の上限を明示的に検討しない限り、どんな精度でもいつか超過し得る。テスト観点としても、境界値分析は「型が正しいか」だけでなく「その型が扱える範囲内か」まで踏み込む必要がある。
+
+## DEF-011: Slack Webhook URL(秘密情報)がエラーメッセージ経由でログに漏洩する（Codex High#8）
+
+- **発見日**: 2026-07-26
+- **検出手段**: 公開前のCodexレビュー。`requests`のHTTPエラー文字列には通常URLが含まれ、Slack Webhook URLはURL自体がcredential（トークンをURLパスに埋め込む形式）であるため、エラー時にstderr/CIログへ漏洩し得ると指摘。
+- **再現手順**: `send_slack_summary(webhook_url, result)`をHTTPエラー（500等）または接続エラーで失敗させ、送出される`NotifyError`のメッセージを確認する。`cli.py`は`except NotifyError as e: typer.echo(f"警告: {e}", err=True)`でこのメッセージをそのまま標準エラー出力に表示する。
+- **期待**: 通知失敗時のメッセージに、Webhook URL（＝Slackアカウントに対する事実上の認証情報）が含まれない。
+- **実際**: `notify.py`が`f"Slackへの通知に失敗しました: {e}"`という形で例外オブジェクトをそのまま文字列化しており、`requests`の例外（`HTTPError`・`ConnectionError`等）の標準的な文字列表現には接続先URL（Webhook URLそのもの、秘密のトークン部分を含む）が含まれるため、そのままstderrやCI実行ログに露出していた。
+- **原因分析**: 例外を捕捉した際に「詳細情報を出す方が親切」という考えで`{e}`をそのまま埋め込んだが、**この例外の詳細情報自体に秘密情報が含まれる**という認識が抜けていた。一般に、外部サービスのURLに認証情報を埋め込む方式（Slack Incoming Webhook・多くのWebhook系API）では、URLそのものを機密として扱う必要がある。
+- **修正**: `notify.py`で`requests.HTTPError`と`requests.RequestException`を分けて捕捉し、ユーザー向けメッセージには**HTTPステータスコードまたは例外の種別名のみ**を含める（URLやトークンを含む詳細文字列は含めない）。元の例外は`raise NotifyError(msg) from e`で例外チェーン（`__cause__`）として保持するため、必要であればPythonのtracebackやデバッガから追跡できるが、**通常のユーザー向け表示・ログには出ない**。
+- **追加した回帰テスト**: `tests/test_notify.py`に秘密トークンを含む模擬Webhook URLを使ったテストを追加（`test_send_slack_summary_http_error_does_not_leak_webhook_url`、`test_send_slack_summary_connection_error_does_not_leak_webhook_url`）。例外メッセージにトークン・URLが含まれないことを直接アサートする。あわせて`test_send_slack_summary_original_exception_still_chained`で、表示上は秘密を隠しつつ原因追跡用の例外チェーンは保持されていることも検証。**修正前コードに戻すと両テストが実際に赤（トークンが露出）になることを確認済み**。
+- **教訓**: 例外メッセージを「詳細だから親切」という理由でそのままユーザーに見せる実装は、詳細情報の中身を精査していないと危険。特に**URLに認証情報を埋め込む方式のAPI**（Slack/Discord Incoming Webhook、多くのSaaSのWebhook機能）を扱うコードでは、例外処理を書く際に「このエラーメッセージのどこかにURLが含まれていないか」を必ず確認する。

@@ -60,3 +60,60 @@ def test_send_slack_summary_raises_notify_error_on_connection_failure() -> None:
 
     with pytest.raises(NotifyError):
         send_slack_summary(_WEBHOOK_URL, _sample_result())
+
+
+# --- FIX-05/DEF-011: Webhook URL(秘密情報)がエラーメッセージに漏洩しないこと ---
+
+_SECRET_WEBHOOK_URL = "https://hooks.slack.com/services/T00000000/B00000000/SuperSecretToken12345"
+_SECRET_TOKEN = "SuperSecretToken12345"
+
+
+@responses.activate
+def test_send_slack_summary_http_error_does_not_leak_webhook_url() -> None:
+    """HTTPエラー時、例外メッセージにWebhook URL(秘密情報)が含まれないこと。
+
+    requestsの例外文字列には通常URLが含まれるため、そのまま表示すると
+    Slack Webhook URL(URL自体がcredential)がstderr/CIログへ露出する
+    (Codex High#8)。ステータスコードのみを表示する形に修正した。
+    """
+    responses.add(responses.POST, _SECRET_WEBHOOK_URL, json={"error": "boom"}, status=500)
+
+    with pytest.raises(NotifyError) as exc_info:
+        send_slack_summary(_SECRET_WEBHOOK_URL, _sample_result())
+
+    message = str(exc_info.value)
+    assert _SECRET_TOKEN not in message
+    assert _SECRET_WEBHOOK_URL not in message
+    assert "500" in message  # ステータスコードは情報として有用なので残す
+
+
+@responses.activate
+def test_send_slack_summary_connection_error_does_not_leak_webhook_url() -> None:
+    """接続エラー時も、例外メッセージにWebhook URL(秘密情報)が含まれないこと。"""
+    responses.add(
+        responses.POST,
+        _SECRET_WEBHOOK_URL,
+        body=requests.exceptions.ConnectionError(
+            f"Failed to establish a new connection to {_SECRET_WEBHOOK_URL}"
+        ),
+    )
+
+    with pytest.raises(NotifyError) as exc_info:
+        send_slack_summary(_SECRET_WEBHOOK_URL, _sample_result())
+
+    message = str(exc_info.value)
+    assert _SECRET_TOKEN not in message
+    assert _SECRET_WEBHOOK_URL not in message
+
+
+@responses.activate
+def test_send_slack_summary_original_exception_still_chained() -> None:
+    """ユーザー表示メッセージからは秘密情報を除去しつつ、原因追跡のため
+    元の例外は`raise ... from e`で例外チェーンとして保持されていること。
+    """
+    responses.add(responses.POST, _SECRET_WEBHOOK_URL, json={"error": "boom"}, status=503)
+
+    with pytest.raises(NotifyError) as exc_info:
+        send_slack_summary(_SECRET_WEBHOOK_URL, _sample_result())
+
+    assert isinstance(exc_info.value.__cause__, requests.HTTPError)
