@@ -138,24 +138,37 @@ ID接頭辞 `DT-`。
 
 ## 5. 観点ID → テスト関数 対応表（トレーサビリティ）
 
-実装時に追記・確定する（設計と実装のズレを防ぐため、実装完了時にこの表を更新すること）。
+実装完了時点（2026-07-26）の実際のテスト関数名で確定させた表。**parametrizeのテストIDに観点IDをそのまま埋め込んでいる**ため、`pytest -k "EQ-QTY"` のように観点IDでテストを絞り込める（表と実装の乖離が起きにくい設計）。
 
-| 観点ID | テストファイル | テスト関数名 |
+| 観点ID | テストファイル | テスト関数名（parametrize IDに観点IDを埋め込み） |
 |---|---|---|
-| EQ-DATE-01〜04, EQ-STORE-01〜02, EQ-PRODUCT-01〜02, EQ-QTY-01〜04, EQ-PRICE-01〜03 | `tests/test_loader.py` | `test_row_validation[*]`（parametrize、idはEQ-ID） |
-| BV-QTY-01〜03, BV-PRICE-01〜03 | `tests/test_loader.py`, `tests/test_aggregate.py` | `test_row_validation[BV-*]`, `test_aggregate_boundary_values` |
-| BV-FILE-01〜03 | `tests/test_loader.py`, `tests/test_cli.py` | `test_load_empty_file`, `test_load_header_only`, `test_cli_single_row` |
-| BV-FILE-04 | `tests/test_performance.py` | `test_large_input_performance`（marker=slow） |
-| BV-ENC-01〜04 | `tests/test_loader.py` | `test_load_encoding[*]`, `test_load_encoding_fallback_failure` |
+| EQ-DATE-01〜04 | `tests/test_models.py` | `test_validate_date_valid[EQ-DATE-01*]`, `test_validate_date_invalid[EQ-DATE-02*/03*/04*]` |
+| EQ-STORE-01〜02, EQ-PRODUCT-01〜02 | `tests/test_models.py` | `test_validate_text_field_valid[EQ-STORE-01*]`, `test_validate_text_field_invalid[EQ-STORE-02*]`（store/productは同一実装を共有） |
+| EQ-QTY-01〜04 | `tests/test_models.py` | `test_validate_quantity_valid[EQ-QTY-01*]`, `test_validate_quantity_invalid[EQ-QTY-02*/03*/04*]`, `test_validate_quantity_rejects_fullwidth_explicitly` |
+| EQ-PRICE-01〜03 | `tests/test_models.py` | `test_validate_unit_price_valid[EQ-PRICE-01*]`, `test_validate_unit_price_invalid[EQ-PRICE-02*/03*]` |
+| BV-QTY-01〜03 | `tests/test_models.py`, `tests/test_aggregate.py` | `test_validate_quantity_valid[BV-QTY-01-zero/BV-QTY-03-large]`, `test_validate_quantity_invalid[BV-QTY-02*]`, `test_sale_row_amount_zero_quantity_is_zero_yen`, `test_aggregate_boundary_zero_quantity_and_zero_price` |
+| BV-PRICE-01〜03 | `tests/test_models.py`, `tests/test_aggregate.py` | `test_validate_unit_price_valid[BV-PRICE-01-zero/BV-PRICE-03-precise]`, `test_validate_unit_price_invalid[BV-PRICE-02*]`, `test_sale_row_amount_no_rounding_error_on_repeated_addition`, `test_aggregate_precise_decimal_no_rounding_error` |
+| BV-FILE-01 | `tests/test_loader.py` | `test_load_file_empty_file_is_file_error` |
+| BV-FILE-02 | `tests/test_loader.py`, `tests/test_cli.py` | `test_load_file_header_only_returns_empty_without_file_error`, `test_dt2_03_zero_valid_rows_exits_no_data` |
+| BV-FILE-03 | `tests/test_loader.py`, `tests/test_cli.py` | `test_load_file_single_row`, `test_bv_file_03_single_row_succeeds` |
+| BV-FILE-04 | `tests/test_performance.py` | `test_large_input_performance_completes_within_time_budget`, `test_large_input_memory_stays_bounded`（marker=slow・既定除外） |
+| BV-ENC-01 | `tests/test_loader.py` | `test_load_file_utf8_without_bom` |
+| BV-ENC-02 | `tests/test_loader.py` | `test_load_file_utf8_with_bom` |
+| BV-ENC-03 | `tests/test_loader.py` | `test_load_file_shift_jis` |
+| BV-ENC-04 | `tests/test_loader.py` | `test_load_file_undecodable_bytes_becomes_file_error`, `test_load_files_one_broken_file_does_not_stop_others` |
 | BV-DUP-01 | `tests/test_aggregate.py` | `test_aggregate_duplicate_lines_are_summed` |
-| BV-SEC-01〜02 | `tests/test_security.py` | `test_csv_injection_sanitization[*]` |
-| DT-1-01〜07 | `tests/test_loader.py` | `test_row_validation_decision_table[DT-1-*]` |
-| DT-2-01〜05 | `tests/test_cli.py` | `test_cli_exit_codes[DT-2-*]` |
-| DT-3-01〜04 | `tests/test_cli.py` | `test_cli_output_options[DT-3-*]` |
-| （性質検証） | `tests/test_properties.py` | `test_property_*`（Hypothesis） |
-| （出力回帰） | `tests/test_golden.py` | `test_golden_*` |
-| （堅牢性） | `tests/test_robustness.py` | `test_atomic_write_on_interruption`, `test_idempotent_reruns` |
-| （通知） | `tests/test_notify.py` | `test_notify_*` |
+| BV-SEC-01 | `tests/test_report.py` | `test_sanitize_csv_field_neutralizes_dangerous_prefixes[BV-SEC-01-*]`, `test_render_csv_report_sanitizes_dangerous_store_name` |
+| BV-SEC-02 | `tests/test_report.py` | `test_sanitize_csv_field_leaves_normal_values_untouched[BV-SEC-02-*]` |
+| DT-1-01〜07 | `tests/test_models.py` | `test_parse_row_dt1_01_all_valid` 〜 `test_parse_row_dt1_07_all_fields_invalid`（7関数） |
+| DT-2-01〜05 | `tests/test_cli.py` | `test_dt2_01_nonexistent_input_path_exits_usage_error` 〜 `test_dt2_05_all_valid_rows_exits_success`（5関数） |
+| DT-3-01〜04 | `tests/test_cli.py` | `test_dt3_01_markdown_without_report_errors_skips_error_file` 〜 `test_dt3_04_invalid_format_exits_usage_error`（4関数） |
+| （性質検証・6性質） | `tests/test_properties.py` | `test_property_total_amount_equals_sum_of_{store,product,date}_amounts`, `test_property_total_quantity_equals_sum_of_store_quantities`, `test_property_aggregate_is_order_independent`, `test_property_no_negative_amounts_when_inputs_nonnegative` |
+| （出力回帰） | `tests/test_golden.py` | `test_golden_csv_report_matches_reference`, `test_golden_markdown_report_matches_reference` |
+| （堅牢性: 原子的書き込み・冪等性） | `tests/test_robustness.py` | `test_atomic_write_interruption_leaves_previous_content_intact`, `test_atomic_write_interruption_when_no_previous_file_leaves_nothing`, `test_idempotent_reruns_produce_byte_identical_output`, `test_idempotent_reruns_with_directory_input_and_multiple_files` |
+| （通知） | `tests/test_notify.py` | `test_build_slack_payload_contains_totals`, `test_send_slack_summary_success_posts_expected_payload`, `test_send_slack_summary_raises_notify_error_on_{http_error,connection_failure}` |
+| （構造化ログ） | `tests/test_logging_setup.py`, `tests/test_cli.py` | `test_build_run_summary_fields`, `test_log_run_summary_*`, `test_structured_log_summary_emitted_on_{success,no_data}` |
+
+> 注記: `tests/test_security.py` / `tests/test_robustness.py` の分割方針は実装時に見直した。CSVインジェクション対策(BV-SEC-*)は`report.py`の責務であるため`tests/test_report.py`に統合し、独立した`test_security.py`は作成していない。
 
 ---
 

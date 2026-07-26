@@ -9,7 +9,8 @@
 ![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-> カバレッジバッジは2026-07-26時点のローカル計測値(行/分岐ともに100%)。最新の実測値はCIの`test-evidence-*` artifact(`coverage.xml`)で確認できる。
+> カバレッジバッジは2026-07-26時点のローカル計測値(行/分岐ともに100%・手動更新)。最新の実測値はCIの`test-evidence-*` artifact(`coverage.xml`)で確認できる。
+> ミューテーションスコアは`mutation.yml`の初回実行後に実測値を追記する(現状は手動スポットチェック8/8。経緯は[docs/test-report.md](docs/test-report.md) §5参照)。
 
 ---
 
