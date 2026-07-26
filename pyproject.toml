@@ -25,7 +25,6 @@ dev = [
     "hypothesis>=6.100.0",
     "mutmut>=3.2.0",
     "responses>=0.25.0",
-    "freezegun>=1.5.0",
     "ruff>=0.6.0",
     "mypy>=1.11.0",
     "pip-audit>=2.7.0",

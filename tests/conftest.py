@@ -1,4 +1,14 @@
-"""共通フィクスチャ。決定性の担保(乱数シード・時刻固定)もここで一括管理する。"""
+"""共通フィクスチャ。CSVファイル作成のヘルパーを提供する。
+
+FIX-11: 以前のdocstringは「決定性の担保(乱数シード・時刻固定)もここで
+一括管理する」と書いていたが、実体が無かった(虚偽のdocstring)。現状の
+テストスイートは日時固定や時刻フリーズを必要としない(コード側が
+datetime.now()等を使っておらず、出力にタイムスタンプを埋め込まない
+ため)。順序不変性を検証するtest_property_aggregate_is_order_independent
+は、ローカルスコープの`random.Random(42)`で既に決定的にシャッフルして
+おり、グローバルな乱数シード管理も不要。実態に合わせてdocstringを
+訂正し、未使用だった`freezegun`依存もpyproject.tomlから削除した。
+"""
 
 from __future__ import annotations
 
