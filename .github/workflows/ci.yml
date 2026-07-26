@@ -18,14 +18,19 @@ jobs:
         python-version: ["3.11", "3.12", "3.13", "3.14"]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies
         run: python -m pip install -e ".[dev]"
+
+      # 実行時の実環境を証跡化する(FIX-15: 依存は下限指定のみで非再現のため、
+      # 少なくとも「その時何が実際にインストールされたか」を残す)。
+      - name: Record installed package versions
+        run: python -m pip freeze > pip-freeze.txt
 
       - name: Lint (ruff)
         run: ruff check .
@@ -43,13 +48,14 @@ jobs:
       # (手作業のエビデンス収集を、CIの成果物として自動で残す形に置き換える狙い)
       - name: Upload test evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-evidence-${{ matrix.os }}-py${{ matrix.python-version }}
           path: |
             junit.xml
             htmlcov/
             coverage.xml
+            pip-freeze.txt
           retention-days: 30
 
   publish-coverage-report:
@@ -65,7 +71,7 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Download coverage HTML (ubuntu / py3.12 representative leg)
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: test-evidence-ubuntu-latest-py3.12
           path: report
@@ -80,7 +86,10 @@ jobs:
   pr-summary:
     name: Post test result summary on PR
     needs: test
-    if: github.event_name == 'pull_request'
+    # FIX-13(Codex指摘): needs:testが失敗すると既定でこのジョブはskipされ、
+    # 「一番結果を見たい失敗時」にコメントが出ないという逆転現象が起きていた。
+    # !cancelled()により、testが失敗(failure)しても(キャンセルされない限り)実行する。
+    if: ${{ !cancelled() && github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
@@ -88,11 +97,17 @@ jobs:
       contents: read
     steps:
       - name: Download JUnit results (all matrix legs)
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: test-evidence-*
           path: artifacts
 
+      # FIX-14(Codex指摘): 通常のpull_requestイベントではfork由来のGITHUB_TOKENは
+      # 書き込み権限が無く、fork PR/DependabotのPRではこのステップが403になる
+      # (このリポジトリのブランチから出すPRという自分のPR運用を前提とする)。
+      # fork PR対応が必要になった場合はworkflow_run構成への移行を検討する。
+      # 第三者actionはcommit SHA固定が望ましいが、このオフライン環境では現行
+      # リリースのSHAを確認できないため、当面はバージョンタグを使用する。
       - name: Publish summary comment
         uses: EnricoMi/publish-unit-test-result-action@v2
         with:

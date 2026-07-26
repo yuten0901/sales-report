@@ -2,6 +2,13 @@ name: Mutation testing
 
 # mutmutは内部でos.fork()を使用しておりPOSIX専用(Windows非対応、docs/defects.md DEF-003参照)。
 # 実行コストが高いため、通常のCI(ci.yml)とは分離し、main pushと週次・手動実行のみに限定する。
+#
+# 注記(FIX-12): このワークフローはWindows非対応のためローカルで一度も実行できておらず、
+# mutmutのCLIの正確な引数仕様(特に`mutmut results`の`--all`オプションの形式)を
+# 実機で確認できていない。Codexレビューにより「mutmut 3系の`results --all`は
+# 真偽値を伴う形式(例: `--all true`)であり、単純なフラグではない」と指摘されたため、
+# 複数の呼び出し形式を順に試すフォールバック構成にしている。初回CI実行で
+# 実際に動く形式が判明したら、このフォールバックは簡略化すること。
 on:
   push:
     branches: [main]
@@ -16,14 +23,19 @@ jobs:
   mutmut:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
       - name: Install dependencies
         run: python -m pip install -e ".[dev]"
+
+      # 実行時の実環境を証跡化する(FIX-15: 依存は下限指定のみで非再現のため、
+      # 少なくとも「その時何が実際にインストールされたか」を残す)。
+      - name: Record installed package versions
+        run: python -m pip freeze > pip-freeze.txt
 
       - name: Run mutation testing
         run: mutmut run || true # 生存ミュータントの有無にかかわらずここでは継続し、次段で閾値判定する
@@ -31,20 +43,44 @@ jobs:
       - name: Summarize mutation score
         id: summary
         run: |
-          mutmut results --all > mutmut-results.txt || true
+          set +e
+          # FIX-12: `mutmut results --all`の正確な引数仕様が実機未確認のため、
+          # 複数の呼び出し形式を順に試す(最初に成功したものを採用)。
+          mutmut results --all true > mutmut-results.txt 2>mutmut-results-stderr.txt
+          if [ $? -ne 0 ]; then
+            echo "「mutmut results --all true」が失敗。「mutmut results --all」を試します" >&2
+            mutmut results --all > mutmut-results.txt 2>mutmut-results-stderr.txt
+          fi
+          if [ $? -ne 0 ]; then
+            echo "「mutmut results --all」も失敗。「mutmut results」(non-killedのみ)にフォールバックします" >&2
+            echo "WARNING: killedの内訳が取得できないため、スコアが不正確になる可能性があります" >&2
+            mutmut results > mutmut-results.txt 2>mutmut-results-stderr.txt
+          fi
+          set -e
+          cat mutmut-results-stderr.txt >&2 || true
+
           python - <<'EOF'
-          killed = 0
-          survived = 0
+          from collections import Counter
+
+          counts: Counter = Counter()
           with open("mutmut-results.txt", encoding="utf-8") as f:
               for line in f:
-                  if ": killed" in line:
-                      killed += 1
-                  elif ": survived" in line:
-                      survived += 1
-          total = killed + survived
+                  line = line.strip()
+                  if ": " not in line:
+                      continue
+                  status = line.rsplit(": ", 1)[-1].strip()
+                  counts[status] += 1
+
+          # FIX-12: killed/survivedだけでなくtimeout/suspicious/no tests/skipped等も
+          # 分母に含める(一部ステータスを無視すると過大評価になるため)。
+          total = sum(counts.values())
+          killed = counts.get("killed", 0)
+          print(f"ステータス内訳: {dict(counts)}")
+
           if total == 0:
               print("ミューテーションが1件も生成されませんでした(設定を確認してください)")
               raise SystemExit(1)
+
           score = killed / total * 100
           print(f"ミューテーションスコア: {score:.1f}% ({killed}/{total} killed)")
           with open("mutmut-score.txt", "w", encoding="utf-8") as out:
@@ -53,19 +89,23 @@ jobs:
 
       - name: Upload mutation report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mutation-report
           path: |
             mutmut-results.txt
+            mutmut-results-stderr.txt
             mutmut-score.txt
+            pip-freeze.txt
           retention-days: 30
 
       # 閾値ゲート(目標80%)。
       # 注記: mutmutはネイティブWindowsで実行不可なためローカル(開発機)では未検証。
-      # このワークフローの初回実行結果を見て、設定に問題が無ければ continue-on-error を外し
+      # 上記の通りresultsコマンドの引数仕様も実機未確認のため、このゲートは
+      # **試験運用中**の位置づけとし、continue-on-errorでCI全体を止めない。
+      # このワークフローの初回実行結果を見て、想定通り動作すれば continue-on-error を外し
       # 正式なゲートにする(docs/test-report.md 残存リスク参照)。
-      - name: Gate on mutation score threshold (80%)
+      - name: Gate on mutation score threshold (80%, 試験運用中)
         continue-on-error: true
         run: |
           score=$(cat mutmut-score.txt)
