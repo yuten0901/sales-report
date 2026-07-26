@@ -10,7 +10,7 @@
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 > カバレッジバッジは2026-07-26時点のローカル計測値(行/分岐ともに100%・手動更新)。最新の実測値はCIの`test-evidence-*` artifact(`coverage.xml`)で確認できる。
-> ミューテーションスコアは`mutation.yml`の初回実行後に実測値を追記する(現状は手動スポットチェック8/8。経緯は[docs/test-report.md](docs/test-report.md) §5参照)。
+> ミューテーションスコアは`mutation.yml`の初回実行後に実測値を追記する。現状は公開前レビューで指摘された箇所を手動で個別検証(体系的な2回・各8件で全検知)しているが、**これは網羅的なmutmut実行の代替ではない**(経緯は[docs/test-report.md](docs/test-report.md) §3/§5参照)。
 
 ---
 
@@ -49,7 +49,7 @@ $ sales-report --input data/sample/sales.csv --output out/summary.md
 1. **テスト設計書**([docs/test-design.md](docs/test-design.md))で同値分割・境界値分析・デシジョンテーブルから観点を導出
 2. 導出した観点をIDで管理し、境界値・異常系を漏れなく網羅(観点ID → テスト関数の対応表あり)
 3. **プロパティベーステスト**(Hypothesis)で「性質」を大量のランダム入力で検証
-4. **ミューテーションテスト**でテスト自体が「バグを実際に検出できるか」を検証(手動スポットチェック8/8検知。詳細は[docs/test-report.md](docs/test-report.md))
+4. **ミューテーションテスト**でテスト自体が「バグを実際に検出できるか」を検証(mutmutはローカル未実行のため手動での個別検証で代替。網羅的な実測値はCI実行後に追記予定。詳細は[docs/test-report.md](docs/test-report.md))
 5. CI(GitHub Actions)でOS×Pythonバージョンのマトリクステストと閾値ゲートを実行
 6. **テスト実行結果(JUnit XML・カバレッジHTML)をCIのartifactとして自動保存** — 手作業のエビデンス収集を、CIの成果物として自動で残す形に置き換えた
 
