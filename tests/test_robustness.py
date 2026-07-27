@@ -6,6 +6,7 @@ docs/test-design.md §1.3(原子的書き込み・冪等性)に対応する。
 from __future__ import annotations
 
 import os
+import stat
 from pathlib import Path
 from typing import Any, Literal
 from unittest import mock
@@ -19,6 +20,11 @@ from sales_report.report import write_atomic
 from .conftest import VALID_CSV_HEADER, MakeCsv
 
 runner = CliRunner()
+
+_posix_only = pytest.mark.skipif(
+    os.name != "posix",
+    reason="POSIXファイル権限の検証(Windowsではmodeビットの意味が限定的なため対象外)",
+)
 
 
 def test_atomic_write_interruption_leaves_previous_content_intact(
@@ -118,6 +124,35 @@ def test_write_atomic_closes_fd_when_fdopen_itself_fails(
     assert len(closed_fds) == 1
     assert not target.exists()
     assert list(tmp_path.iterdir()) == []
+
+
+@_posix_only
+def test_write_atomic_preserves_existing_file_permissions(tmp_path: Path) -> None:
+    """FIX2-02/DEF-020(Codex#4): 既存ファイルへの上書きでは、その既存ファイルの
+    パーミッションを保持すること(tempfile.mkstemp()の既定0600に変わらない)。
+
+    Linux CI(ubuntu-latest)レグで実際に検証されて初めて意味を持つ
+    (Windows開発機では原理的に検出できない欠陥だったため)。
+    """
+    target = tmp_path / "report.csv"
+    target.write_text("old-content\n", encoding="utf-8")
+    os.chmod(target, 0o644)
+
+    write_atomic(target, "new-content\n")
+
+    assert stat.S_IMODE(target.stat().st_mode) == 0o644
+
+
+@_posix_only
+def test_write_atomic_new_file_uses_default_creation_mode(tmp_path: Path) -> None:
+    """FIX2-02: 新規作成時は通常のファイル作成と同じ規則(0o666 & ~umask)を適用する。"""
+    target = tmp_path / "new_report.csv"
+    current_umask = os.umask(0)
+    os.umask(current_umask)
+
+    write_atomic(target, "content\n")
+
+    assert stat.S_IMODE(target.stat().st_mode) == (0o666 & ~current_umask)
 
 
 def test_idempotent_reruns_produce_byte_identical_output(

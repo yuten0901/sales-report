@@ -13,6 +13,7 @@ from __future__ import annotations
 import csv
 import io
 import os
+import stat
 import tempfile
 from collections.abc import Sequence
 from decimal import ROUND_HALF_UP, Decimal
@@ -174,7 +175,30 @@ def write_atomic(path: Path, content: str, encoding: str = "utf-8") -> None:
             raise
         with f:
             f.write(content)
+        _match_mode_before_replace(tmp_path, path)
         os.replace(tmp_path, path)
     except BaseException:
         tmp_path.unlink(missing_ok=True)
         raise
+
+
+def _match_mode_before_replace(tmp_path: Path, target_path: Path) -> None:
+    """FIX2-02(Codex#4): tempfile.mkstemp()が作る一時ファイルは既定で0600
+    (所有者のみ読み書き可)。これをそのままos.replace()で本番パスに置換すると、
+    既存の出力ファイルが0644等の権限を持っていても0600に変わってしまい、
+    Linuxの共有ディレクトリ・公開ディレクトリ・後続ジョブから読めなくなる
+    (Windows開発機のテストでは原理的に検出できない・POSIX固有の欠陥)。
+
+    - 本番パスに既存ファイルがあれば、そのmodeを一時ファイルへ複製する
+      (既存ファイルの権限を勝手に変えない)。
+    - 既存ファイルが無ければ、通常のファイル作成と同じ規則
+      (0o666 & ~umask)を適用する。os.umask()は現在値を返す副作用のある
+      呼び出しのため、取得後ただちに元の値へ戻す。
+    """
+    try:
+        existing_mode = stat.S_IMODE(target_path.stat().st_mode)
+    except FileNotFoundError:
+        current_umask = os.umask(0)
+        os.umask(current_umask)
+        existing_mode = 0o666 & ~current_umask
+    os.chmod(tmp_path, existing_mode)
