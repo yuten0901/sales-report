@@ -15,6 +15,7 @@ import io
 import os
 import tempfile
 from collections.abc import Sequence
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
 from sales_report.aggregate import AggregationResult
@@ -24,6 +25,17 @@ from sales_report.loader import FileError, LoadedRowError
 _CSV_INJECTION_PREFIXES: tuple[str, ...] = ("=", "+", "-", "@", "\t", "\r")
 
 SUPPORTED_FORMATS: tuple[str, ...] = ("csv", "markdown")
+
+# 金額出力の契約: 常に小数点以下2桁で表示する(Codex再レビュー#6)。
+# unit_priceの入力上限が小数2桁(models.py)であり、集計(amount)も2桁を
+# 超える端数を生まないため、この量子化は実パイプラインでは無損失。
+# 契約はあくまで出力層の責務とし、集計層(aggregate.py)は変更しない。
+_MONEY_QUANTUM = Decimal("0.01")
+
+
+def format_money(amount: Decimal) -> str:
+    """金額をCSV/Markdown出力用に小数点以下2桁固定の文字列へ整形する。"""
+    return str(amount.quantize(_MONEY_QUANTUM, rounding=ROUND_HALF_UP))
 
 
 def sanitize_csv_field(value: str) -> str:
@@ -47,12 +59,14 @@ def render_csv_report(result: AggregationResult) -> str:
     writer = csv.writer(output, lineterminator="\n")
     writer.writerow(["区分", "キー", "数量", "金額"])
     for s in result.by_store:
-        writer.writerow(["店舗", sanitize_csv_field(s.store), s.quantity, str(s.amount)])
+        writer.writerow(["店舗", sanitize_csv_field(s.store), s.quantity, format_money(s.amount)])
     for p in result.by_product:
-        writer.writerow(["商品", sanitize_csv_field(p.product), p.quantity, str(p.amount)])
+        writer.writerow(
+            ["商品", sanitize_csv_field(p.product), p.quantity, format_money(p.amount)]
+        )
     for d in result.by_date:
-        writer.writerow(["日付", d.date.isoformat(), d.quantity, str(d.amount)])
-    writer.writerow(["合計", "", result.total_quantity, str(result.total_amount)])
+        writer.writerow(["日付", d.date.isoformat(), d.quantity, format_money(d.amount)])
+    writer.writerow(["合計", "", result.total_quantity, format_money(result.total_amount)])
     return output.getvalue()
 
 
@@ -65,7 +79,9 @@ def render_markdown_report(result: AggregationResult) -> str:
     lines.append("| 店舗 | 数量 | 金額 |")
     lines.append("|---|---|---|")
     for s in result.by_store:
-        lines.append(f"| {escape_markdown_cell(s.store)} | {s.quantity} | {s.amount} |")
+        lines.append(
+            f"| {escape_markdown_cell(s.store)} | {s.quantity} | {format_money(s.amount)} |"
+        )
     lines.append("")
 
     lines.append("## 商品別")
@@ -73,7 +89,9 @@ def render_markdown_report(result: AggregationResult) -> str:
     lines.append("| 商品 | 数量 | 金額 |")
     lines.append("|---|---|---|")
     for p in result.by_product:
-        lines.append(f"| {escape_markdown_cell(p.product)} | {p.quantity} | {p.amount} |")
+        lines.append(
+            f"| {escape_markdown_cell(p.product)} | {p.quantity} | {format_money(p.amount)} |"
+        )
     lines.append("")
 
     lines.append("## 日別")
@@ -81,13 +99,13 @@ def render_markdown_report(result: AggregationResult) -> str:
     lines.append("| 日付 | 数量 | 金額 |")
     lines.append("|---|---|---|")
     for d in result.by_date:
-        lines.append(f"| {d.date.isoformat()} | {d.quantity} | {d.amount} |")
+        lines.append(f"| {d.date.isoformat()} | {d.quantity} | {format_money(d.amount)} |")
     lines.append("")
 
     lines.append("## 合計")
     lines.append("")
     lines.append(f"- 総数量: {result.total_quantity}")
-    lines.append(f"- 総金額: {result.total_amount}")
+    lines.append(f"- 総金額: {format_money(result.total_amount)}")
     lines.append("")
 
     return "\n".join(lines)

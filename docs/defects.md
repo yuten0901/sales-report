@@ -220,3 +220,25 @@ Opus再確認レビューで保留にしていた4件の設計判断を確定・
 - **FIX-14（EnricoMi actionのfork PR制約）**: 通常の`pull_request`イベントではfork由来の`GITHUB_TOKEN`が書き込み権限を持たず、fork PR・DependabotのPRではこのステップが403になる（Codex指摘）。**対応**: 現状は「このリポジトリのブランチから出すPR」という自分のPR運用を前提とすることをコメントで明記し、fork PR対応が必要になった場合は`workflow_run`構成への移行を検討する旨をTODOとして残した。第三者actionのcommit SHA固定は望ましいが、このオフライン環境では現行リリースの正確なSHAを確認できないため、当面はバージョンタグ運用とした。
 - **FIX-15（action版の更新・再現性の証跡化）**: `actions/checkout@v4→v6`、`actions/setup-python@v5→v6`、`actions/upload-artifact@v4→v7`、`actions/download-artifact@v4→v8`に全ワークフロー(`ci.yml`/`mutation.yml`/`security.yml`)で統一（Codex指摘の版数に合わせた。実在するか・正しく動くかは初回CI実行まで未確定）。また、依存を下限指定のみで管理し非再現である点への対応として、`ci.yml`・`mutation.yml`に`pip freeze`の結果を`pip-freeze.txt`としてartifact保存するステップを追加し、「実行時に実際にインストールされたバージョン」を証跡として残せるようにした。
 - **検証**: 3ワークフローファイル全てPythonの`yaml`ライブラリで構文検証済み。`mutation.yml`のヒアドキュメント内Pythonコードも、YAML抽出後に`compile()`で構文チェックし、有効なPythonであることを確認した。ただし**これらは静的な構文検証に留まり、実際にGitHub Actions上で正しく動作するかは初回CI実行まで未検証**（DEF-004の教訓どおり「書いた≠動く」）。
+
+---
+
+## Codex再レビュー対応（fix-spec-02）
+
+前回の3者レビュー・修正完了後、公開前の最終念押しとしてCodexにリポジトリ全体を再レビューさせたところ、新たに18件の指摘を受けた。「100% coverageは品質の証明にならない」という、本ドキュメント自身が既に述べていた主張を裏付ける形で、金額表示契約の欠如・重複ヘッダの黙殺・原子的置換のPOSIX権限破壊など、カバレッジ100%のまま存在し得る欠陥が複数見つかった。詳細な仕様は`portfolio-repo-01-fix-spec-02.md`(FIX2-01〜16)参照。
+
+## DEF-016: 金額の出力形式（小数桁数）が仕様として未定義だった（Codex Medium#6）
+
+- **発見日**: 2026-07-27
+- **検出手段**: Codexによるリポジトリ全体の再レビュー
+- **再現手順**: `unit_price`が整数(`1200`)の明細と小数2桁(`1200.50`)の明細が混在する売上データを集計すると、CSV/Markdown出力の金額列が`1200`と`1200.50`のように**桁数がまちまち**になる。
+- **期待**: 通貨を扱う出力は表示形式が一貫しているべき（監査・突合の対象になり得るため）。
+- **実際**: `render_csv_report`/`render_markdown_report`が`str(Decimal)`をそのまま出力しており、入力側の小数桁数がそのまま透過していた。
+- **原因分析**: 出力フォーマットの契約（何桁で表示するか）を設計時に定義していなかった。ゴールデンテストも手製の`AggregationResult`（あらかじめ2桁小数で構築済み）を直接レンダラーへ渡していたため、`loader→aggregate`を通した際のscale変化を検知できていなかった。
+- **修正**: `report.py`に`format_money(amount: Decimal) -> str`を追加し、常に小数点以下2桁（`ROUND_HALF_UP`で量子化）に統一。CSV/Markdown両レンダラーの金額列を全てこれ経由にした。集計層(`aggregate.py`)自体は変更していない（契約はあくまで出力層の責務）。
+- **追加した回帰テスト**: `tests/test_report.py::test_format_money`（整数・1桁・2桁・3桁小数・0円のパラメータ化）。加えて、手製resultではなく実CSV(`data/golden/pipeline_input.csv`、単価に小数`333.33`を含む)を`load_files→aggregate→render`のフルパイプラインに通して比較する`tests/test_golden.py::test_golden_pipeline_*`を新規追加し、今後同種のscale drift回帰を検知できるようにした。
+- **教訓**: ゴールデンテストは「レンダラー単体」だけでなく「パイプライン全体を通した1本」も必ず用意しないと、層をまたいだ仕様のドリフトを検知できない。
+
+### 追記（FIX2-05）: 独立オラクル比較のint切り捨てを解消（Codex Medium#9）
+
+DEF-013追記のFIX-09で追加した独立オラクル（`tests/test_properties.py`）は、`int(result.total_amount * 100)`で比較しており、result側に1銭未満の誤差が混入していても同じ整数へ丸め落ちて検知できない弱点があった（Codexが再レビューで指摘）。`result.total_amount == Decimal(oracle_cents).scaleb(-2)`という**Decimal同士の直接比較**に修正し、`_oracle_total_cents`を経由する2つのプロパティテスト（総額一致・グルーピングキー取り違え検知）双方に適用した。旧方式が実際に誤差を見逃すことを手動シミュレーションで確認済み（0.004円の混入を、旧方式は見逃し新方式は検知）。

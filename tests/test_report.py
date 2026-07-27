@@ -22,6 +22,7 @@ from sales_report.loader import FileError, LoadedRowError
 from sales_report.models import RowError
 from sales_report.report import (
     escape_markdown_cell,
+    format_money,
     has_errors_to_report,
     render_csv_report,
     render_errors_csv,
@@ -29,6 +30,23 @@ from sales_report.report import (
     sanitize_csv_field,
     write_atomic,
 )
+
+# --- format_money(FIX2-03: 金額は常に小数2桁で出力する契約) -----------------
+
+
+@pytest.mark.parametrize(
+    ("amount", "expected"),
+    [
+        pytest.param(Decimal("100"), "100.00", id="integer-amount-padded"),
+        pytest.param(Decimal("3600.5"), "3600.50", id="one-decimal-padded"),
+        pytest.param(Decimal("3600.50"), "3600.50", id="already-two-decimals"),
+        pytest.param(Decimal("302.997"), "303.00", id="three-decimals-rounded-half-up"),
+        pytest.param(Decimal("0"), "0.00", id="zero"),
+    ],
+)
+def test_format_money(amount: Decimal, expected: str) -> None:
+    assert format_money(amount) == expected
+
 
 # --- sanitize_csv_field (BV-SEC-01/02) --------------------------------------
 

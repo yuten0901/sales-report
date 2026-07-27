@@ -89,7 +89,7 @@ def test_wiring_csv_report_sanitizes_store_column_via_reparse() -> None:
     assert len(store_rows) == 1
     assert store_rows[0][1] == "'+1+1|evil"
     assert store_rows[0][2] == "1"  # 数量列は無害化対象外(数値のまま)
-    assert store_rows[0][3] == "100"  # 金額列も無害化対象外
+    assert store_rows[0][3] == "100.00"  # 金額列も無害化対象外(FIX2-03: 常に2桁表示)
 
 
 # --- render_markdown_report: エスケープ配線(店舗列・商品列の両方) -----------

@@ -118,8 +118,10 @@ def test_property_total_amount_matches_independent_oracle(rows: list[SaleRow]) -
     """
     result = aggregate(rows)
     oracle_cents = _oracle_total_cents(rows)
-    actual_cents = int(result.total_amount * 100)
-    assert actual_cents == oracle_cents
+    # FIX2-05(Codex#9): int(result.total_amount * 100) は小数部分を切り捨てるため、
+    # result側に1銭未満の誤差が混入していても同じ整数へ丸め落ちて検知できない
+    # 弱点があった。Decimal同士を直接比較することで、その誤差混入も検知できる。
+    assert result.total_amount == Decimal(oracle_cents).scaleb(-2)
 
 
 @given(rows=sale_rows(min_size=1, max_size=30))
@@ -142,5 +144,10 @@ def test_property_grouping_key_swap_is_detected_by_oracle(rows: list[SaleRow]) -
             expected_by_store.get(row.store, 0) + row.quantity * price_cents
         )
 
-    actual_by_store = {s.store: int(s.amount * 100) for s in result.by_store}
-    assert actual_by_store == expected_by_store
+    # FIX2-05(Codex#9): int(s.amount * 100)ではなくDecimal同士を直接比較する
+    # (理由は上のtest_property_total_amount_matches_independent_oracle参照)。
+    actual_by_store = {s.store: s.amount for s in result.by_store}
+    expected_by_store_decimal = {
+        store: Decimal(cents).scaleb(-2) for store, cents in expected_by_store.items()
+    }
+    assert actual_by_store == expected_by_store_decimal
