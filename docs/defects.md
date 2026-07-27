@@ -309,3 +309,16 @@ DEF-013追記のFIX-09で追加した独立オラクル（`tests/test_properties
 - **FIX2-11（Codex#8・プロパティテストの生成範囲拡大）**: `tests/strategies.py`に、入力バリデーションの桁数上限（quantity9桁・unit_price整数部12桁）付近まで生成する`sale_rows_high_value()`を追加し、独立オラクル比較を桁数上限でも実施する`test_property_total_amount_matches_independent_oracle_at_input_digit_limits`を新設。**正直な検証結果**: aggregate()のDecimal精度を一時的に28桁へ戻して実行したところ、この新テスト(既定max_size=20)は失敗しなかった——精度オーバーフロー(DEF-010)は約10万件規模の合算でのみ発生するため、少数行のプロパティテストでは原理的に再現しないと判明した。過大な効能を主張せず、docstringに「本テストの役割は精度オーバーフロー検知ではなく桁数上限付近の値そのものの探索」と明記した。
 - **FIX2-09（Codex#10・CSVインジェクション統合テスト）**: 既存の配線検証テスト(`test_wiring_errors_csv_sanitizes_path_column_via_reparse`等)はレンダラーへ`FileError`オブジェクトを直接渡していた。実際に脅威が成立するのは「パス文字列全体が危険な接頭辞で始まる」場合で、これは絶対パスでは起こらず相対パスで危険な名前のディレクトリを`--input`指定した場合に現実的に発生する。`test_wiring_cli_sanitizes_dangerous_directory_name_in_errors_csv_end_to_end`を追加し、実際にそのようなディレクトリ・ファイルをcwd切替(`monkeypatch.chdir`)の上で作成し、CLI経由でエラーCSVを生成させて検証する形にした。赤→緑確認済み（`sanitize_csv_field`呼び出しを一時的に外すと実際に失敗することを確認）。
 - **教訓**: 「テストの生成範囲を広げる」こと自体が目的化すると、広げた範囲が実際に何を検知できるのか(できないのか)を確認せずに済ませてしまいがちである。FIX2-11では意図的に「効かなかった」ことを検証し、正直に記録した——これもまた本ドキュメントが一貫して重視する態度である。
+
+## FIX2-01/14: ミューテーションスコア集計を「緑バッジ詐称」構造から解消（Codex High#1・Medium#5）
+
+- **発見日**: 2026-07-27
+- **検出手段**: Codexによるリポジトリ全体の再レビュー
+- **問題1(ゲートが機能しない・Codex#1)**: `mutation.yml`のミューテーションゲート(閾値80%)が`continue-on-error: true`で、かつ集計前の`mutmut run`自体も`|| true`で終了コードを握り潰していた。この組み合わせにより、**スコアが0%でも、mutmut自体が設定ミスやクラッシュで1件も収集できなくても、ワークフロー全体は必ず緑になる**構造だった。READMEが「閾値ゲートを実行」と表現していたことと合わせ、QAポートフォリオとしての看板を毀損しかねない最重要指摘。
+- **問題2(未テストの本番ロジック・Codex#5)**: スコア集計ロジック(ステータス別カウント→スコア算出)がCIワークフローのYAMLヒアドキュメント内に直接書かれたPythonであり、pytestで検証できない「未テストの本番ロジック」になっていた。
+- **修正**:
+  1. 集計ロジックを`scripts/mutation_score.py`として切り出し(`parse_mutmut_results`/`compute_mutation_score`/CLIエントリポイント`main`)、`tests/test_mutation_score.py`で単体テスト可能にした(`pyproject.toml`に`pythonpath = ["scripts"]`を追加)。
+  2. 「ミューテーションが1件も収集されなかった」場合を`MutationCollectionError`として明確に区別し、`main()`がその場合に非ゼロ終了するようにした。このステップは`continue-on-error`を付けずに呼び出すため、**収集失敗自体がワークフローを赤にする**(スコアの良し悪しとは独立に、計測が成立したことを保証する)。
+  3. `mutmut run`自体の`|| true`は「生存ミュータントの存在(正常な非ゼロ終了)を許容する」目的のみに限定する旨をコメントで明記し、実際にクラッシュ・0件収集した場合は次段(`mutation_score.py`)が検知して赤にする設計にした。
+- **追加した回帰テスト**: `tests/test_mutation_score.py`(10件): `parse_mutmut_results`のフォーマット解析、`compute_mutation_score`のステータス内訳集計(timeout/suspicious等も分母に含む・FIX-12の教訓の回帰確認)、収集失敗時の`MutationCollectionError`、CLIエントリポイントの正常系・異常系(スコアファイルを書かず非ゼロ終了)。
+- **教訓**: 「閾値ゲートを置いた」ことと「そのゲートが実際に機能する」ことは別物。`continue-on-error`と「失敗の握り潰し」を同じ箇所に重ねると、ゲート自体が意味を失っていることに気づきにくい。CI実行結果を一度も見ていない段階でこそ、こうした構造的な穴を静的レビューで潰しておく価値がある。

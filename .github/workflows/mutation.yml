@@ -38,10 +38,14 @@ jobs:
         run: python -m pip freeze > pip-freeze.txt
 
       - name: Run mutation testing
-        run: mutmut run || true # 生存ミュータントの有無にかかわらずここでは継続し、次段で閾値判定する
+        # FIX2-01(Codex#1): 生存ミュータントの存在は正常な非ゼロ終了として許容し
+        # 次段で閾値判定するが、mutmut自体のクラッシュ・設定ミスまで`|| true`で
+        # 握り潰すと原因が分からなくなる。ここでは終了コードを見ずに継続し、
+        # 実際に集計できたか(1件も収集されなかったか)は次段の
+        # scripts/mutation_score.pyが判定してワークフローを赤にする。
+        run: mutmut run || true
 
-      - name: Summarize mutation score
-        id: summary
+      - name: Collect mutmut results
         run: |
           set +e
           # FIX-12: `mutmut results --all`の正確な引数仕様が実機未確認のため、
@@ -59,33 +63,16 @@ jobs:
           set -e
           cat mutmut-results-stderr.txt >&2 || true
 
-          python - <<'EOF'
-          from collections import Counter
-
-          counts: Counter = Counter()
-          with open("mutmut-results.txt", encoding="utf-8") as f:
-              for line in f:
-                  line = line.strip()
-                  if ": " not in line:
-                      continue
-                  status = line.rsplit(": ", 1)[-1].strip()
-                  counts[status] += 1
-
-          # FIX-12: killed/survivedだけでなくtimeout/suspicious/no tests/skipped等も
-          # 分母に含める(一部ステータスを無視すると過大評価になるため)。
-          total = sum(counts.values())
-          killed = counts.get("killed", 0)
-          print(f"ステータス内訳: {dict(counts)}")
-
-          if total == 0:
-              print("ミューテーションが1件も生成されませんでした(設定を確認してください)")
-              raise SystemExit(1)
-
-          score = killed / total * 100
-          print(f"ミューテーションスコア: {score:.1f}% ({killed}/{total} killed)")
-          with open("mutmut-score.txt", "w", encoding="utf-8") as out:
-              out.write(f"{score:.1f}")
-          EOF
+      - name: Summarize mutation score
+        id: summary
+        # FIX2-01/14(Codex#1/#5): 集計ロジックをヒアドキュメント内Pythonから
+        # scripts/mutation_score.pyへ切り出し、pytestでテスト可能にした
+        # (tests/test_mutation_score.py参照)。「1件も収集できなかった」場合は
+        # このスクリプトが非ゼロ終了し、continue-on-errorを付けていないため
+        # ワークフロー自体が赤になる(=スコアの良し悪しに関わらず収集できた
+        # ことを保証する。従来はここが`SystemExit(1)`のみで、CIとして
+        # 明示的に失敗として扱われるかは検証できていなかった)。
+        run: python scripts/mutation_score.py mutmut-results.txt mutmut-score.txt
 
       - name: Upload mutation report
         if: always()

@@ -36,6 +36,9 @@ packages = ["src/sales_report"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# FIX2-01/14: CIワークフロー(mutation.yml)内のミューテーションスコア集計
+# ロジックをscripts/mutation_score.pyへ切り出し、pytestからテスト可能にする。
+pythonpath = ["scripts"]
 markers = [
     "slow: 大容量・性能テスト(通常実行から分離)",
 ]
