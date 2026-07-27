@@ -11,7 +11,21 @@ from collections import Counter
 from pathlib import Path
 
 import pytest
-from mutation_score import (
+
+# DEF-023(CI初回実行で発見): mutmutはプロジェクトを mutants/ にコピーして
+# テストスイート全体をベースライン実行するが、そのサンドボックスでは
+# pytestの pythonpath=["scripts"] が解決せず `mutation_score` を import できない。
+# 通常のCI(ci.yml)では pythonpath が効くのでこのテストは実行される(スキップ
+# されない)が、mutmutの mutants/ サンドボックスでのみ import失敗→スキップになる。
+# こうすることで、mutmutのベースライン収集がこのテストのImportErrorで停止し
+# 「全ミュータント未実行(0%)」になる事故を防ぐ(mutation_scoreはsrc/を変異
+# させるmutmutの変異対象ではないため、ここでスキップしても検知力測定に影響しない)。
+pytest.importorskip(
+    "mutation_score",
+    reason="scripts/がsys.pathに無い環境(mutmutのmutants/サンドボックス等)ではスキップ(DEF-023)",
+)
+
+from mutation_score import (  # noqa: E402  (importorskipによる遅延importのため)
     MutationCollectionError,
     compute_mutation_score,
     main,
@@ -71,8 +85,10 @@ def test_compute_mutation_score_zero_survived_is_100_percent() -> None:
     assert result.score == pytest.approx(100.0)
 
 
-def test_compute_mutation_score_no_killed_key_defaults_to_zero() -> None:
-    """killedキー自体が存在しない(全滅)場合もKeyErrorにならずスコア0%になる。"""
+def test_compute_mutation_score_no_killed_but_real_survivors_is_genuine_zero() -> None:
+    """killed=0でもsurvived>0なら「本物の0%」(テストは実行されたが1個も殺せず)。
+    これはMutationCollectionErrorにはせず、正当なスコア0%として返す。
+    """
     result = compute_mutation_score(Counter({"survived": 3}))
     assert result.score == pytest.approx(0.0)
 
@@ -83,6 +99,16 @@ def test_compute_mutation_score_zero_total_raises_collection_error() -> None:
     """
     with pytest.raises(MutationCollectionError):
         compute_mutation_score(Counter())
+
+
+def test_compute_mutation_score_all_not_checked_raises_collection_error() -> None:
+    """DEF-023(CI初回実行で発見): mutmutがベースライン収集で停止しミュータントを
+    1個もテストしなかった場合、全て`not checked`のまま集計される。killed+survivedが
+    0件=実判定に到達していない=計測不成立であり、「スコア0%・緑」で通してはならない。
+    MutationCollectionErrorを送出し、呼び出し側でワークフローを赤にする。
+    """
+    with pytest.raises(MutationCollectionError):
+        compute_mutation_score(Counter({"not checked": 619}))
 
 
 # --- main (CLIエントリポイント) -----------------------------------------------

@@ -332,8 +332,22 @@ DEF-013追記のFIX-09で追加した独立オラクル（`tests/test_properties
   1. 集計ロジックを`scripts/mutation_score.py`として切り出し(`parse_mutmut_results`/`compute_mutation_score`/CLIエントリポイント`main`)、`tests/test_mutation_score.py`で単体テスト可能にした(`pyproject.toml`に`pythonpath = ["scripts"]`を追加)。
   2. 「ミューテーションが1件も収集されなかった」場合を`MutationCollectionError`として明確に区別し、`main()`がその場合に非ゼロ終了するようにした。このステップは`continue-on-error`を付けずに呼び出すため、**収集失敗自体がワークフローを赤にする**(スコアの良し悪しとは独立に、計測が成立したことを保証する)。
   3. `mutmut run`自体の`|| true`は「生存ミュータントの存在(正常な非ゼロ終了)を許容する」目的のみに限定する旨をコメントで明記し、実際にクラッシュ・0件収集した場合は次段(`mutation_score.py`)が検知して赤にする設計にした。
-- **追加した回帰テスト**: `tests/test_mutation_score.py`(10件): `parse_mutmut_results`のフォーマット解析、`compute_mutation_score`のステータス内訳集計(timeout/suspicious等も分母に含む・FIX-12の教訓の回帰確認)、収集失敗時の`MutationCollectionError`、CLIエントリポイントの正常系・異常系(スコアファイルを書かず非ゼロ終了)。
+- **追加した回帰テスト**: `tests/test_mutation_score.py`(当初10件・DEF-023でさらに1件追加し11件): `parse_mutmut_results`のフォーマット解析、`compute_mutation_score`のステータス内訳集計(timeout/suspicious等も分母に含む・FIX-12の教訓の回帰確認)、収集失敗時の`MutationCollectionError`、CLIエントリポイントの正常系・異常系(スコアファイルを書かず非ゼロ終了)。
 - **教訓**: 「閾値ゲートを置いた」ことと「そのゲートが実際に機能する」ことは別物。`continue-on-error`と「失敗の握り潰し」を同じ箇所に重ねると、ゲート自体が意味を失っていることに気づきにくい。CI実行結果を一度も見ていない段階でこそ、こうした構造的な穴を静的レビューで潰しておく価値がある。
+
+## DEF-023: mutation testが「全ミュータント未実行・0%・緑」で通っていた（公開後のCI初回実行で発見）
+
+- **発見日**: 2026-07-27
+- **検出手段**: **GitHub公開後、実際にCIを走らせて初めて判明**(残存リスク#0/#1で「実機で動かすまで確定できない」と明記していた領域そのもの)。`mutation.yml`は緑だったが、artifactの`mutmut-score.txt`が`0.0`、`mutmut-results.txt`が全619ミュータント`not checked`だった。
+- **再現手順**: mainへpushしてMutation testingワークフローを実行し、mutation-report artifactのスコアと内訳を確認する。
+- **期待**: mutmutがミュータントを生成し、各ミュータントにテストスイートを実行して`killed`/`survived`の実判定を出すこと。緑=計測が成立していること。
+- **実際**: mutmutはミュータントを619個生成した後、ベースラインの`stats`収集(テストスイート全体の実行)で`tests/test_mutation_score.py`のimportに失敗して停止し、**1個もミュータントをテストせず終了**。全て`not checked`のまま集計され、スコア0.0%。しかもワークフローは緑のまま(FIX2-01の集計ロジックが「全部未実行」を検知できず0%として通した)。
+- **原因分析**: 二重の自己作り込み。①**FIX2-01で追加した`test_mutation_score.py`が原因**——`from mutation_score import ...`が`pythonpath=["scripts"]`に依存しており、mutmutがプロジェクトを`mutants/`にコピーして実行するサンドボックスではその`scripts/`が解決せず`ModuleNotFoundError`。mutmutはベースライン収集の1エラーで全体を停止する(`stopping after 1 failures` / `failed to collect stats. runner returned 1`)。②**FIX2-01の集計ロジックの取りこぼし**——「収集0件」は失敗扱いにしたが「収集はされたが全て未実行(killed+survived==0)」は通常の非killedとして分母に入れ、スコア0%・緑で通してしまった。まさにFIX2-01で直したはずの「緑バッジ詐称」の別パターン。
+- **修正**:
+  1. **根本原因**: `tests/test_mutation_score.py`冒頭を`pytest.importorskip("mutation_score")`にし、`scripts/`がsys.pathに無い環境(mutmutサンドボックス)ではこのテストを**エラーでなくスキップ**する。通常のCI(ci.yml)では`pythonpath`が効くので実行される(スキップされない)。`mutation_score`は`src/`を変異させるmutmutの変異対象ではないため、サンドボックスでのスキップは検知力測定に影響しない。
+  2. **正直化**: `compute_mutation_score`に「killed+survived==0(1個も実判定に到達していない)」を`MutationCollectionError`として送出するガードを追加。「本物の0%」(survived>0=テストは実行されたが1個も殺せなかった)とは区別する。これにより、今後mutmutが再び未実行のまま終わった場合はワークフローが**赤**になる。
+- **追加した回帰テスト**: `tests/test_mutation_score.py::test_compute_mutation_score_all_not_checked_raises_collection_error`(全`not checked`→エラー)・`test_compute_mutation_score_no_killed_but_real_survivors_is_genuine_zero`(survivedありの本物の0%はエラーにしない)。
+- **教訓**: **「CIが緑」と「CIが意味のある検証をしている」は別物**——DEF-004(CIが起動しない)・FIX2-01(ゲートが常に緑)に続く3例目の「CIの見かけの緑を信用しない」実例。そして、**この欠陥は静的レビュー(Opus再確認)を通過し、実際に公開してCIを回して初めて露呈した**。残存リスク#0で「公開後、CIが緑になるのを目視確認するまでリリース完了とみなさない」としていた判断が正しかったことの実証(緑になったが、その中身を artifact まで見に行ったことでさらに問題が見つかった=「緑の目視」だけでも不十分)。
 
 ## FIX2-07/12/13: CIワークフローの残り3件（Codex指摘・GitHub API実照会で対応）
 

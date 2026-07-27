@@ -62,14 +62,30 @@ def compute_mutation_score(counts: Counter[str]) -> MutationScoreResult:
 
     FIX-12(前回)の教訓を踏襲し、killed/survivedだけでなくtimeout/suspicious/
     no tests/skipped等の全ステータスを分母に含める(一部を無視すると
-    過大評価になる)。1件も収集できていない場合は`MutationCollectionError`を
-    送出する(FIX2-01: 「収集失敗」と「真のスコア0%」を区別するため)。
+    過大評価になる)。
+
+    以下は「真のスコア」ではなく計測が成立していない状態として区別し、
+    `MutationCollectionError`を送出する(FIX2-01/DEF-023):
+    - 1件も収集できていない(total==0): 設定ミス・mutmutクラッシュ等。
+    - 収集はされたが1件もkilled/survivedの実判定に到達していない
+      (killed+survived==0): mutmutがベースライン(stats)収集で停止し、
+      ミュータントを1個もテストせず全て`not checked`のまま終わったケース
+      (CI初回実行で実際に発生・DEF-023)。これを見逃すと「スコア0%・緑」
+      という無意味な結果が通ってしまう。なお「本物の0%」は survived>0
+      (テストが実行されたが1個も殺せなかった)であり、これとは区別する。
     """
     total = sum(counts.values())
     if total == 0:
         msg = "ミューテーションが1件も収集されませんでした(設定を確認してください)"
         raise MutationCollectionError(msg)
     killed = counts.get("killed", 0)
+    executed = killed + counts.get("survived", 0)
+    if executed == 0:
+        msg = (
+            "ミュータントは収集されましたが、1件もkilled/survivedの実判定に到達しませんでした"
+            f"(全て未実行の可能性・計測不成立)。内訳: {dict(counts)}"
+        )
+        raise MutationCollectionError(msg)
     score = killed / total * 100
     return MutationScoreResult(counts=dict(counts), total=total, killed=killed, score=score)
 
