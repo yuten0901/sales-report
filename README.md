@@ -3,14 +3,13 @@
 複数の売上CSVを読み込み、店舗別・商品別・日別に集計してサマリレポート(CSV/Markdown)を出力するCLIツール。
 
 [![CI](https://github.com/yuten0901/sales-report/actions/workflows/ci.yml/badge.svg)](https://github.com/yuten0901/sales-report/actions/workflows/ci.yml)
-[![Mutation testing](https://github.com/yuten0901/sales-report/actions/workflows/mutation.yml/badge.svg)](https://github.com/yuten0901/sales-report/actions/workflows/mutation.yml)
 [![Security](https://github.com/yuten0901/sales-report/actions/workflows/security.yml/badge.svg)](https://github.com/yuten0901/sales-report/actions/workflows/security.yml)
-![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue)
+![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-blue)
 ![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-> カバレッジバッジは2026-07-26時点のローカル計測値(行/分岐ともに100%・手動更新)。最新の実測値はCIの`test-evidence-*` artifact(`coverage.xml`)で確認できる。
-> ミューテーションスコアは`mutation.yml`の初回実行後に実測値を追記する。現状は公開前レビューで指摘された箇所を手動で個別検証(体系的な2回・各8件で全検知)しているが、**これは網羅的なmutmut実行の代替ではない**(経緯は[docs/test-report.md](docs/test-report.md) §3/§5参照)。
+> カバレッジ100%は「テストがコードの各行・各分岐を通ること」を示す指標であり、それ自体が品質の証明ではない(実際、カバレッジ100%の状態から公開前・公開後のレビューで多数の欠陥が見つかった。経緯は[docs/test-report.md](docs/test-report.md)・[docs/defects.md](docs/defects.md))。数値は2026-07-27時点のローカル計測(行/分岐とも100%・手動更新)で、最新の実測はCIの`test-evidence-*` artifact(`coverage.xml`)で確認できる。
+> ミューテーションテスト(mutmut)は**実験的**で手動起動([.github/workflows/mutation.yml](.github/workflows/mutation.yml))とし、現状は環境適合が未完(理由は[docs/known-issues.md](docs/known-issues.md))。テストの検知力は当面、手動ミューテーションによる**補完的検証**で担保している(対象・方法・限界は[docs/test-report.md](docs/test-report.md) §3)。
 
 ---
 
@@ -49,8 +48,8 @@ $ sales-report --input data/sample/sales.csv --output out/summary.md
 1. **テスト設計書**([docs/test-design.md](docs/test-design.md))で同値分割・境界値分析・デシジョンテーブルから観点を導出
 2. 導出した観点をIDで管理し、境界値・異常系を漏れなく網羅(観点ID → テスト関数の対応表あり)
 3. **プロパティベーステスト**(Hypothesis)で「性質」を大量のランダム入力で検証
-4. **ミューテーションテスト**でテスト自体が「バグを実際に検出できるか」を検証(mutmutはローカル未実行のため手動での個別検証で代替。網羅的な実測値はCI実行後に追記予定。詳細は[docs/test-report.md](docs/test-report.md))
-5. CI(GitHub Actions)でOS×Pythonバージョンのマトリクステストと閾値ゲートを実行
+4. **ミューテーション観点**でテスト自体が「バグを実際に検出できるか」を検証(自動mmutmutは実験的・環境適合が未完のため、当面は手動ミューテーションによる補完的検証。詳細は[docs/test-report.md](docs/test-report.md)・[docs/known-issues.md](docs/known-issues.md))
+5. CI(GitHub Actions)でOS×Pythonバージョンのマトリクステスト・カバレッジ・セキュリティスキャンを実行し、結果をartifactに保存
 6. **テスト実行結果(JUnit XML・カバレッジHTML)をCIのartifactとして自動保存** — 手作業のエビデンス収集を、CIの成果物として自動で残す形に置き換えた
 
 「元QAとして、正常系だけでなく異常系・境界値まで責任を持つ」という進め方を、AIツールを活用しながら自分の設計・検証判断で実装したもの。
