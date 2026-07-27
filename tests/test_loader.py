@@ -98,11 +98,60 @@ def test_load_file_shift_jis(make_csv: MakeCsv, valid_csv_content: str) -> None:
     assert rows[0].store == "渋谷店"
 
 
+def test_load_file_utf16_with_bom_is_accepted(make_csv: MakeCsv, valid_csv_content: str) -> None:
+    """BV-ENC-05/FIX2-08(Codex#2): BOM付きUTF-16は検出して読み込める
+    (BOM無しUTF-16は他エンコーディングとの判別が原理的に難しく対象外のまま)。
+    """
+    path = make_csv("sales_utf16.csv", valid_csv_content, encoding="utf-16")
+    rows, errors, file_error = load_file(path)
+    assert file_error is None
+    assert errors == []
+    assert len(rows) == 3
+    assert rows[0].store == "渋谷店"
+
+
+def test_load_file_cp932_silently_misreads_other_encodings_known_limitation(
+    tmp_path: Path,
+) -> None:
+    """FIX2-08(Codex#2)・既知の限界の明示: cp932は受理範囲が非常に広いため、
+    EUC-JP等の他エンコーディングのバイト列でも例外を出さずにデコードでき、
+    元の文字と異なる文字化けした内容として黙って読み込まれ得る。
+
+    真の文字コード検出(chardet等)を導入しない限り解消できない構造的な限界
+    であり、docs/test-design.md/test-report.mdに残存リスクとして明記する
+    (このテストはクラッシュしないことではなく、意味的に誤った内容が
+    サイレントに読み込まれてしまう挙動そのものを記録することが目的)。
+    """
+    # "渋谷店"のEUC-JPバイト列は、UTF-8としてはエラーになるがcp932としては
+    # エラーにならずデコードできてしまい、結果は元の文字列と一致しない
+    # (文字化け)。他フィールドをASCIIのみにするのは、日本語をUTF-8で
+    # 混在させるとマルチバイト境界がずれてcp932自体が失敗してしまい、
+    # 「誤読される」という本来示したい限界を再現できなくなるため。
+    euc_jp_bytes = "渋谷店".encode("euc-jp")
+    path = tmp_path / "euc_jp_misread.csv"
+    path.write_bytes(
+        f"{VALID_CSV_HEADER}\n2026-07-01,".encode()
+        + euc_jp_bytes
+        + b",ProductA,3,1200\n"
+    )
+
+    rows, errors, file_error = load_file(path)
+
+    assert file_error is None
+    assert errors == []
+    assert len(rows) == 1
+    # 元の"渋谷店"としては読めていない(=文字化けした別の文字列になっている)。
+    # これは正しい挙動ではなく、cp932フォールバックの既知の限界の記録。
+    assert rows[0].store != "渋谷店"
+
+
 def test_load_file_undecodable_bytes_becomes_file_error(tmp_path: Path) -> None:
     """BV-ENC-04: UTF-8/Shift-JISいずれでもデコードできないバイト列はファイルエラーになる。"""
     path = tmp_path / "broken.csv"
-    # 0x81 単独はcp932としても不完全なマルチバイト先頭であり、多くの場合both encodingで失敗する。
-    path.write_bytes(b"\xff\xfe\x00\x81\x00\xff")
+    # 0x81単独はcp932としても不完全なマルチバイト先頭でありデコード失敗する。
+    # FIX2-08でUTF-16 BOM検出を追加したため、`\xff\xfe`始まり(UTF-16 LE BOM)は
+    # 意図せずUTF-16として解釈されてしまう。BOMと誤認しないバイト列にする。
+    path.write_bytes(b"\x81\xff")
     rows, errors, file_error = load_file(path)
     assert rows == []
     assert errors == []
@@ -219,6 +268,42 @@ def test_load_file_header_with_surrounding_whitespace_is_accepted(make_csv: Make
     assert rows[0].quantity == 3
 
 
+def test_load_file_duplicate_header_after_normalization_becomes_file_error(
+    make_csv: MakeCsv,
+) -> None:
+    """FIX2-04/DEF-017(Codex#3): 正規化(strip+casefold)後に同名になる列が
+    複数ある場合、どちらの値が採用されたか利用者に分からないまま黙って
+    後勝ちで上書きされていた(修正前)。ファイルエラーとして明示的に拒否する。
+    """
+    content = (
+        "date,Date,store,product,quantity,unit_price\n"
+        "2026-07-01,2026-07-02,渋谷店,商品A,3,1200\n"
+    )
+    path = make_csv("duplicate_header.csv", content)
+    rows, errors, file_error = load_file(path)
+    assert rows == []
+    assert errors == []
+    assert isinstance(file_error, FileError)
+    assert "重複した列名" in file_error.reason
+    assert "date" in file_error.reason
+
+
+def test_load_file_duplicate_header_via_whitespace_variant_becomes_file_error(
+    make_csv: MakeCsv,
+) -> None:
+    """FIX2-04: 前後空白違いによる重複(`store`と` store `)も検出すること。"""
+    content = (
+        "date,store, store ,product,quantity,unit_price\n"
+        "2026-07-01,渋谷店,新宿店,商品A,3,1200\n"
+    )
+    path = make_csv("duplicate_header_whitespace.csv", content)
+    rows, errors, file_error = load_file(path)
+    assert rows == []
+    assert errors == []
+    assert isinstance(file_error, FileError)
+    assert "重複した列名" in file_error.reason
+
+
 def test_load_file_semantic_alias_header_is_not_accepted(make_csv: MakeCsv) -> None:
     """A-1(設計裁定・非対応の明示): 「売上日」のような意味的なエイリアスは
     正規化(strip+casefold)の対象外であり、必須列不足として扱われる。
@@ -268,15 +353,27 @@ def test_load_file_short_row_is_recorded_as_error_not_crash(make_csv: MakeCsv) -
     assert "unit_price" in errors[0].reason_summary
 
 
-def test_load_file_excess_columns_are_ignored_safely(make_csv: MakeCsv) -> None:
-    """列数がヘッダより多い行(restkey)は、必須列さえ揃っていれば余分な値を
-    無視して正常に処理されること(csv.DictReaderの既定restkey=Noneキーに吸収される)。
+def test_load_file_excess_non_empty_columns_become_row_error(make_csv: MakeCsv) -> None:
+    """FIX2-10/DEF-019(Codex#11): 列数がヘッダより多く、かつ余剰値が非空の行は、
+    区切り文字の混入・列ずれの可能性がある「データ破損の隠蔽」を避けるため
+    行エラーにする(修正前は余剰値を無条件に無視していた)。
     """
-    content = (
-        f"{VALID_CSV_HEADER}\n"
-        "2026-07-01,渋谷店,商品A,3,1200,備考,余分\n"
-    )
+    content = f"{VALID_CSV_HEADER}\n2026-07-01,渋谷店,商品A,3,1200,備考,余分\n"
     path = make_csv("excess_columns.csv", content)
+    rows, errors, file_error = load_file(path)
+    assert file_error is None
+    assert rows == []
+    assert len(errors) == 1
+    assert errors[0].row_number == 2
+    assert "余剰な列があります" in errors[0].reason_summary
+
+
+def test_load_file_trailing_empty_extra_column_is_tolerated(make_csv: MakeCsv) -> None:
+    """FIX2-10: 末尾の区切り文字による空の余剰列(例: 行末の`,`)は無害として
+    許容し、行エラーにしない(誤検知を避けるため非空の余剰値のみを対象とする)。
+    """
+    content = f"{VALID_CSV_HEADER}\n2026-07-01,渋谷店,商品A,3,1200,\n"
+    path = make_csv("trailing_comma.csv", content)
     rows, errors, file_error = load_file(path)
     assert file_error is None
     assert errors == []
