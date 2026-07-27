@@ -75,3 +75,9 @@ ignore_missing_imports = true
 
 [tool.mutmut]
 source_paths = ["src"]
+# DEF-023: mutmutはsrc/とtests/をmutants/サンドボックスへコピーするが、data/
+# (ゴールデンテストが参照する期待出力ファイル)はコピーしないため、ベースライン
+# のテスト収集でtest_golden.pyがFileNotFoundErrorになりmutmutが停止していた。
+# テスト実行に必要な追加ファイルはalso_copyでサンドボックスへ含める。
+# (scripts/はtest_mutation_score.py側をimportorskipにして対応済みのため不要)
+also_copy = ["data/"]

@@ -343,10 +343,11 @@ DEF-013追記のFIX-09で追加した独立オラクル（`tests/test_properties
 - **期待**: mutmutがミュータントを生成し、各ミュータントにテストスイートを実行して`killed`/`survived`の実判定を出すこと。緑=計測が成立していること。
 - **実際**: mutmutはミュータントを619個生成した後、ベースラインの`stats`収集(テストスイート全体の実行)で`tests/test_mutation_score.py`のimportに失敗して停止し、**1個もミュータントをテストせず終了**。全て`not checked`のまま集計され、スコア0.0%。しかもワークフローは緑のまま(FIX2-01の集計ロジックが「全部未実行」を検知できず0%として通した)。
 - **原因分析**: 二重の自己作り込み。①**FIX2-01で追加した`test_mutation_score.py`が原因**——`from mutation_score import ...`が`pythonpath=["scripts"]`に依存しており、mutmutがプロジェクトを`mutants/`にコピーして実行するサンドボックスではその`scripts/`が解決せず`ModuleNotFoundError`。mutmutはベースライン収集の1エラーで全体を停止する(`stopping after 1 failures` / `failed to collect stats. runner returned 1`)。②**FIX2-01の集計ロジックの取りこぼし**——「収集0件」は失敗扱いにしたが「収集はされたが全て未実行(killed+survived==0)」は通常の非killedとして分母に入れ、スコア0%・緑で通してしまった。まさにFIX2-01で直したはずの「緑バッジ詐称」の別パターン。
-- **修正**:
-  1. **根本原因**: `tests/test_mutation_score.py`冒頭を`pytest.importorskip("mutation_score")`にし、`scripts/`がsys.pathに無い環境(mutmutサンドボックス)ではこのテストを**エラーでなくスキップ**する。通常のCI(ci.yml)では`pythonpath`が効くので実行される(スキップされない)。`mutation_score`は`src/`を変異させるmutmutの変異対象ではないため、サンドボックスでのスキップは検知力測定に影響しない。
+- **修正**（3点。うち3は最初の修正をpushして再実行した際に判明した第2の欠落）:
+  1. **根本原因①(scripts/)**: `tests/test_mutation_score.py`冒頭を`pytest.importorskip("mutation_score")`にし、`scripts/`がsys.pathに無い環境(mutmutサンドボックス)ではこのテストを**エラーでなくスキップ**する。通常のCI(ci.yml)では`pythonpath`が効くので実行される(スキップされない)。`mutation_score`は`src/`を変異させるmutmutの変異対象ではないため、サンドボックスでのスキップは検知力測定に影響しない。
   2. **正直化**: `compute_mutation_score`に「killed+survived==0(1個も実判定に到達していない)」を`MutationCollectionError`として送出するガードを追加。「本物の0%」(survived>0=テストは実行されたが1個も殺せなかった)とは区別する。これにより、今後mutmutが再び未実行のまま終わった場合はワークフローが**赤**になる。
-- **追加した回帰テスト**: `tests/test_mutation_score.py::test_compute_mutation_score_all_not_checked_raises_collection_error`(全`not checked`→エラー)・`test_compute_mutation_score_no_killed_but_real_survivors_is_genuine_zero`(survivedありの本物の0%はエラーにしない)。
+  3. **根本原因②(data/)**: 上記1・2をpushして再実行したところ、今度は`tests/test_golden.py`が`mutants/data/golden/report_sample.csv`のFileNotFoundErrorでベースライン停止(mutmutは`src/`・`tests/`はコピーするが`data/`は含めない)。正直化ガード(修正2)が正しく機能し「全未実行→赤」になったため露呈。`pyproject.toml`の`[tool.mutmut]`に`also_copy = ["data/"]`を追加し、ゴールデンテストが参照する期待出力ファイルをサンドボックスに含める(mutmut公式のadditional-files設定・テスト側は無改変)。
+- **追加した回帰テスト**: `tests/test_mutation_score.py::test_compute_mutation_score_all_not_checked_raises_collection_error`(全`not checked`→エラー)・`test_compute_mutation_score_no_killed_but_real_survivors_is_genuine_zero`(survivedありの本物の0%はエラーにしない)。なお根本原因①②(サンドボックスのファイル欠落)は「mutmut実機でしか再現しない」ためローカルの自動テストでは守れず、CI実行結果の目視が唯一の検証手段(＝残存リスクとして明記)。
 - **教訓**: **「CIが緑」と「CIが意味のある検証をしている」は別物**——DEF-004(CIが起動しない)・FIX2-01(ゲートが常に緑)に続く3例目の「CIの見かけの緑を信用しない」実例。そして、**この欠陥は静的レビュー(Opus再確認)を通過し、実際に公開してCIを回して初めて露呈した**。残存リスク#0で「公開後、CIが緑になるのを目視確認するまでリリース完了とみなさない」としていた判断が正しかったことの実証(緑になったが、その中身を artifact まで見に行ったことでさらに問題が見つかった=「緑の目視」だけでも不十分)。
 
 ## FIX2-07/12/13: CIワークフローの残り3件（Codex指摘・GitHub API実照会で対応）
