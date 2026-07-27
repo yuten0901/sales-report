@@ -20,7 +20,7 @@ from hypothesis import given, settings
 from sales_report.aggregate import aggregate
 from sales_report.models import SaleRow
 
-from .strategies import sale_rows
+from .strategies import sale_rows, sale_rows_high_value
 
 
 @given(rows=sale_rows())
@@ -151,3 +151,31 @@ def test_property_grouping_key_swap_is_detected_by_oracle(rows: list[SaleRow]) -
         store: Decimal(cents).scaleb(-2) for store, cents in expected_by_store.items()
     }
     assert actual_by_store == expected_by_store_decimal
+
+
+@given(rows=sale_rows_high_value())
+@settings(max_examples=30)
+def test_property_total_amount_matches_independent_oracle_at_input_digit_limits(
+    rows: list[SaleRow],
+) -> None:
+    """FIX2-11(Codex#8): 独立オラクル(性質7)と同じ検証を、入力バリデーションの
+    桁数上限(quantity9桁・unit_price整数部12桁)ぎりぎりの値でも行う。
+
+    既定のsale_rows()はquantity上限10,000・unit_price上限100,000という
+    小さい範囲しか生成しないため、バリデーション境界付近の値が
+    乗算・集計ロジックを正しく通ることをプロパティテストで確認できて
+    いなかった(Codexが再レビューで指摘)。
+
+    **重要な限界の記録**: 「28桁精度では丸め誤差が起きる」という実際の
+    精度オーバーフロー(DEF-010)は、少数行(本テストの既定max_size=20)では
+    再現しない(手動検証済み: aggregate()のcontext精度を一時的に28に
+    落としてもこのテストは失敗しなかった)。桁数上限×大量行(約10万件)の
+    組み合わせでのみ発生するため、その閾値はプロパティテストでなく
+    `tests/test_aggregate.py`の専用回帰テスト(二分探索で閾値を特定した
+    決め打ちのn=100,001件)が担う。本テストの役割は精度オーバーフローの
+    検知ではなく、**桁数上限付近の値そのもの**(パース・乗算・比較)に
+    未知のバグが無いかをランダム化して探索することである。
+    """
+    result = aggregate(rows)
+    oracle_cents = _oracle_total_cents(rows)
+    assert result.total_amount == Decimal(oracle_cents).scaleb(-2)

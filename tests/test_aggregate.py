@@ -5,6 +5,8 @@ from __future__ import annotations
 import datetime as dt
 from decimal import Decimal
 
+import pytest
+
 from sales_report.aggregate import StoreSummary, aggregate
 from sales_report.models import SaleRow
 
@@ -118,6 +120,7 @@ def test_aggregate_precise_decimal_no_rounding_error() -> None:
     assert result.total_amount == Decimal("302.997")
 
 
+@pytest.mark.slow
 def test_aggregate_no_rounding_at_large_scale_with_default_28_digit_precision_would_fail() -> None:
     """FIX-04/DEF-010: 既定のDecimalコンテキスト(精度28桁)では、大量の高額行を
     合算すると例外なく丸め誤差が発生する(Codexレビューが実測で指摘)。
@@ -127,6 +130,11 @@ def test_aggregate_no_rounding_at_large_scale_with_default_28_digit_precision_wo
     ちょうど丸め誤差が発生し、高精度(50桁)コンテキストでは発生しない」という
     閾値を二分探索で特定したもの(n=100,000は一致・n=100,001から不一致になる)。
     aggregate()が内部でlocalcontext(prec=50)を使っていることの直接的な証明。
+
+    FIX2-15(Codex#7): 100,001個のオブジェクトを毎回生成するため通常の
+    テスト実行を不必要に重くしていた。境界値の証明という性質上、この
+    構成自体(prec=50への依存)を縮小すると意味が変わってしまうため、
+    性能テストと同様にslowマーカーで通常実行から分離する。
     """
     max_price = Decimal("999999999999.99")  # 整数部12桁の上限値
     max_quantity = 999999999  # 9桁の上限値

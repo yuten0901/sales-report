@@ -20,6 +20,7 @@ from decimal import Decimal
 from pathlib import Path
 from unittest import mock
 
+import pytest
 from typer.testing import CliRunner
 
 from sales_report.aggregate import AggregationResult, ProductSummary, StoreSummary
@@ -164,6 +165,54 @@ def test_wiring_errors_csv_sanitizes_path_column_via_reparse() -> None:
     error_rows = [r for r in rows if r and r[0] == "ファイルエラー"]
     assert len(error_rows) == 1
     assert error_rows[0][1] == "'@evil.csv"
+
+
+def test_wiring_cli_sanitizes_dangerous_directory_name_in_errors_csv_end_to_end(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """FIX2-09(Codex#10): サニタイズの検証を、レンダラーへの直接渡し(上記2テスト)
+    ではなく、CLI経由の実ファイルパスから発生した経路で行う。
+
+    パス文字列全体がCSVインジェクションの危険な接頭辞で始まるのは、絶対パスの
+    場合は通常あり得ない(ドライブ文字や`/`から始まるため)。現実的に起こり
+    得るのは、**危険な名前を持つディレクトリを相対パスで`--input`指定した**
+    場合(discover_csv_filesがそのディレクトリ配下のファイルを
+    `<危険なディレクトリ名>/<ファイル名>`として返すため)。cwdを一時的に
+    切り替え、実際にそのようなディレクトリとファイルを作成して検証する。
+    """
+    monkeypatch.chdir(tmp_path)
+    dangerous_dir = Path("=evildir")
+    dangerous_dir.mkdir()
+    (dangerous_dir / "good.csv").write_text(
+        f"{VALID_CSV_HEADER}\n2026-07-01,渋谷店,商品A,1,100\n", encoding="utf-8"
+    )
+    # 必須列(unit_price)が欠落したファイル→ファイルエラーになる。
+    (dangerous_dir / "broken.csv").write_text(
+        "date,store,product,quantity\n2026-07-01,渋谷店,商品B,1\n", encoding="utf-8"
+    )
+    errors_output = Path("errors.csv")
+
+    result = runner.invoke(
+        app,
+        [
+            "--input",
+            str(dangerous_dir),
+            "--output",
+            "summary.md",
+            "--report-errors",
+            str(errors_output),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert errors_output.exists()
+    content = errors_output.read_text(encoding="utf-8")
+    rows = _parse_csv_cells(content)
+
+    error_rows = [r for r in rows if r and r[0] == "ファイルエラー"]
+    assert len(error_rows) == 1
+    expected_path = str(dangerous_dir / "broken.csv")
+    assert error_rows[0][1] == f"'{expected_path}"
 
 
 # --- notify.py: requests.postの呼び出し引数(timeout)の配線検証 -------------

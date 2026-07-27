@@ -302,3 +302,10 @@ DEF-013追記のFIX-09で追加した独立オラクル（`tests/test_properties
 - **修正**: 環境変数`SALES_REPORT_SLACK_WEBHOOK`によるフォールバックを追加（`--slack-webhook`フラグが明示指定されればそちらを優先）。`--help`にも秘密情報である旨と環境変数の使用推奨を明記。
 - **追加した回帰テスト**: `tests/test_cli.py::test_slack_webhook_env_var_is_used_when_flag_omitted`（環境変数のみで送信されること。旧実装では失敗することを確認=赤→緑）・`test_slack_webhook_flag_takes_priority_over_env_var`（両方設定時はフラグ優先）。
 - **教訓**: 「ログに出さない」（DEF-011）と「そもそも露出しにくい経路で受け渡す」（DEF-021）は別の対策であり、片方の修正がもう片方を自動的にカバーしない。
+
+## FIX2-09/11/15: テストの検証粒度の底上げ（Codex指摘・バグではなくテスト品質改善）
+
+- **FIX2-15（Codex#7・重いテストのslow分離）**: `test_aggregate_no_rounding_at_large_scale_with_default_28_digit_precision_would_fail`が毎回100,001個のオブジェクトを生成し通常のテスト実行を不必要に重くしていた。性能テストと同じ`slow`マーカーで分離（`pytest -m slow`で個別実行）。境界の意味(prec=50への依存)を保つため縮小はせず、分離のみで対応。
+- **FIX2-11（Codex#8・プロパティテストの生成範囲拡大）**: `tests/strategies.py`に、入力バリデーションの桁数上限（quantity9桁・unit_price整数部12桁）付近まで生成する`sale_rows_high_value()`を追加し、独立オラクル比較を桁数上限でも実施する`test_property_total_amount_matches_independent_oracle_at_input_digit_limits`を新設。**正直な検証結果**: aggregate()のDecimal精度を一時的に28桁へ戻して実行したところ、この新テスト(既定max_size=20)は失敗しなかった——精度オーバーフロー(DEF-010)は約10万件規模の合算でのみ発生するため、少数行のプロパティテストでは原理的に再現しないと判明した。過大な効能を主張せず、docstringに「本テストの役割は精度オーバーフロー検知ではなく桁数上限付近の値そのものの探索」と明記した。
+- **FIX2-09（Codex#10・CSVインジェクション統合テスト）**: 既存の配線検証テスト(`test_wiring_errors_csv_sanitizes_path_column_via_reparse`等)はレンダラーへ`FileError`オブジェクトを直接渡していた。実際に脅威が成立するのは「パス文字列全体が危険な接頭辞で始まる」場合で、これは絶対パスでは起こらず相対パスで危険な名前のディレクトリを`--input`指定した場合に現実的に発生する。`test_wiring_cli_sanitizes_dangerous_directory_name_in_errors_csv_end_to_end`を追加し、実際にそのようなディレクトリ・ファイルをcwd切替(`monkeypatch.chdir`)の上で作成し、CLI経由でエラーCSVを生成させて検証する形にした。赤→緑確認済み（`sanitize_csv_field`呼び出しを一時的に外すと実際に失敗することを確認）。
+- **教訓**: 「テストの生成範囲を広げる」こと自体が目的化すると、広げた範囲が実際に何を検知できるのか(できないのか)を確認せずに済ませてしまいがちである。FIX2-11では意図的に「効かなかった」ことを検証し、正直に記録した——これもまた本ドキュメントが一貫して重視する態度である。
