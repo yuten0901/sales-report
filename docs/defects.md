@@ -322,3 +322,12 @@ DEF-013追記のFIX-09で追加した独立オラクル（`tests/test_properties
   3. `mutmut run`自体の`|| true`は「生存ミュータントの存在(正常な非ゼロ終了)を許容する」目的のみに限定する旨をコメントで明記し、実際にクラッシュ・0件収集した場合は次段(`mutation_score.py`)が検知して赤にする設計にした。
 - **追加した回帰テスト**: `tests/test_mutation_score.py`(10件): `parse_mutmut_results`のフォーマット解析、`compute_mutation_score`のステータス内訳集計(timeout/suspicious等も分母に含む・FIX-12の教訓の回帰確認)、収集失敗時の`MutationCollectionError`、CLIエントリポイントの正常系・異常系(スコアファイルを書かず非ゼロ終了)。
 - **教訓**: 「閾値ゲートを置いた」ことと「そのゲートが実際に機能する」ことは別物。`continue-on-error`と「失敗の握り潰し」を同じ箇所に重ねると、ゲート自体が意味を失っていることに気づきにくい。CI実行結果を一度も見ていない段階でこそ、こうした構造的な穴を静的レビューで潰しておく価値がある。
+
+## FIX2-07/12/13: CIワークフローの残り3件（Codex指摘・GitHub API実照会で対応）
+
+前回(FIX-12〜15)はオフライン環境の制約で「実機・実際のSHAを確認できない」まま推測ベースの対応に留めていた。今回はサンドボックスから`gh api`によるGitHub APIアクセスが可能であることが判明したため、**推測ではなく実際の値を確認**した上で対応した。
+
+- **FIX2-07（Pages設定の欠落・Codex#13）**: `publish-coverage-report`ジョブが`actions/configure-pages`を経由せず`actions/upload-pages-artifact`を直接呼んでいた。リポジトリ設定でPagesのSourceが"GitHub Actions"になっていない環境では初回実行が失敗し得る。`actions/configure-pages@v6`ステップを追加。あわせて`actions/upload-pages-artifact`(v3→v5)・`actions/deploy-pages`(v4→v5)を、`gh api repos/<owner>/<repo>/releases/latest`で実際に確認した最新メジャーバージョンに更新した。
+- **FIX2-12（早期失敗時にPRサマリーが存在しないartifactを前提にする・Codex#15）**: `test`ジョブが依存インストール・ruff・mypy等でjunit.xml生成前に失敗すると、`pr-summary`ジョブの`download-artifact`が対象を見つけられず失敗し得た。ダウンロードステップに`continue-on-error: true`を付け、後続で`find`によりjunit.xmlの実在を確認してから`Publish summary comment`を実行する(`if: steps.check.outputs.found == 'true'`)構成にした。「テスト失敗時にコメントする」(FIX-13)だけでなく「テストまで到達しない失敗」でもワークフロー全体を無用に赤くしない。
+- **FIX2-13（第三者actionのタグ運用・Codex#16）**: 前回は「オフライン環境のため実際のSHAを確認できない」としてバージョンタグ(`@v2`)運用のまま残していた。今回`gh api repos/EnricoMi/publish-unit-test-result-action/releases/latest`で実際に照会した結果、最新v2リリース(v2.24.0)のコミットSHAが`d0a4676d0e0b938bc201470d88276b7c74c712b3`であることを確認し、これでピン留めした(バージョンをコメント併記)。推測のSHAは記載していない——実在しないコミットや無関係なコミットにピン留めすることは、タグ運用の可変リスクより悪い(サイレントに壊れるか、無関係なコードを実行しかねない)ため。あわせて`Publish summary comment`ステップに`continue-on-error: true`を付け、fork PR等での403(FIX-14)がワークフロー全体を赤にしないようにした。
+- **教訓**: 「オフラインだから確認できない」という制約は、その時点のサンドボックス環境の実際の制約を指しているに過ぎず、恒久的な制約ではない。同じ疑問に再度当たったときに「本当に確認手段が無いか」を先に検証する価値がある(`gh api`が使えることが分かったのは今回が初めて)。

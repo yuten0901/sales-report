@@ -18,9 +18,9 @@ jobs:
         python-version: ["3.11", "3.12", "3.13", "3.14"]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
 
@@ -76,12 +76,17 @@ jobs:
           name: test-evidence-ubuntu-latest-py3.12
           path: report
 
-      - uses: actions/upload-pages-artifact@v3
+      # FIX2-07(Codex#13): 従来はconfigure-pagesを省略しており、リポジトリ設定で
+      # Pages の Source が "GitHub Actions" になっていない環境では初回実行が
+      # 静かに失敗し得た。明示的に設定を検証・有効化するステップを追加する。
+      - uses: actions/configure-pages@v6
+
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: report/htmlcov
 
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
 
   pr-summary:
     name: Post test result summary on PR
@@ -96,20 +101,46 @@ jobs:
       checks: write
       contents: read
     steps:
+      # FIX2-12(Codex#15): test側がdependency install/ruff/mypy等で早期失敗すると
+      # そもそもjunit.xmlが生成されずartifactが存在しない。download-artifactを
+      # 失敗させず(continue-on-error)、後続ステップでartifactの有無を明示的に
+      # 判定してから公開する(「テスト失敗時にコメントする」だけでなく
+      # 「テストまで到達しない失敗」でもワークフロー全体を無用に落とさない)。
       - name: Download JUnit results (all matrix legs)
+        id: download
+        continue-on-error: true
         uses: actions/download-artifact@v8
         with:
           pattern: test-evidence-*
           path: artifacts
 
-      # FIX-14(Codex指摘): 通常のpull_requestイベントではfork由来のGITHUB_TOKENは
-      # 書き込み権限が無く、fork PR/DependabotのPRではこのステップが403になる
-      # (このリポジトリのブランチから出すPRという自分のPR運用を前提とする)。
-      # fork PR対応が必要になった場合はworkflow_run構成への移行を検討する。
-      # 第三者actionはcommit SHA固定が望ましいが、このオフライン環境では現行
-      # リリースのSHAを確認できないため、当面はバージョンタグを使用する。
+      - name: Check whether JUnit results were found
+        id: check
+        run: |
+          if [ "${{ steps.download.outcome }}" = "success" ] && [ -n "$(find artifacts -name junit.xml -print -quit 2>/dev/null)" ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "JUnit結果のartifactが見つかりませんでした(テストがjunit.xml生成前に失敗した可能性)。サマリコメントの投稿をスキップします。" >&2
+          fi
+        shell: bash
+
+      # FIX-14/FIX2-13(Codex指摘): 通常のpull_requestイベントではfork由来の
+      # GITHUB_TOKENは書き込み権限が無く、fork PR/DependabotのPRではこの
+      # ステップが403になる(このリポジトリのブランチから出すPRという自分の
+      # PR運用を前提とする。fork PR対応が必要になった場合はworkflow_run構成
+      # への移行を検討する)。continue-on-errorにより、403で失敗してもワーク
+      # フロー全体は赤にしない(サマリコメントは付加価値であり、本体のテスト
+      # 結果[testジョブ]とは独立した成否として扱う)。
+      #
+      # 第三者actionはタグでなくcommit SHAで固定する(サプライチェーンの
+      # 安全性のため)。以下のSHAは2026-07-27時点でGitHub API経由(gh api
+      # repos/EnricoMi/publish-unit-test-result-action/releases/latest)で
+      # 実際に確認したv2.24.0のコミットであり、推測・仮のプレースホルダーではない。
       - name: Publish summary comment
-        uses: EnricoMi/publish-unit-test-result-action@v2
+        if: steps.check.outputs.found == 'true'
+        continue-on-error: true
+        uses: EnricoMi/publish-unit-test-result-action@d0a4676d0e0b938bc201470d88276b7c74c712b3 # v2.24.0
         with:
           files: "artifacts/**/junit.xml"
           comment_title: "テスト結果サマリ"
