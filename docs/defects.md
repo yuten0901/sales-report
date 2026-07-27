@@ -303,6 +303,18 @@ DEF-013追記のFIX-09で追加した独立オラクル（`tests/test_properties
 - **追加した回帰テスト**: `tests/test_cli.py::test_slack_webhook_env_var_is_used_when_flag_omitted`（環境変数のみで送信されること。旧実装では失敗することを確認=赤→緑）・`test_slack_webhook_flag_takes_priority_over_env_var`（両方設定時はフラグ優先）。
 - **教訓**: 「ログに出さない」（DEF-011）と「そもそも露出しにくい経路で受け渡す」（DEF-021）は別の対策であり、片方の修正がもう片方を自動的にカバーしない。
 
+## DEF-022: 金額整形(format_money)が巨大な合計額でクラッシュする（fix-spec-02のOpus再確認で発見・自己作り込み）
+
+- **発見日**: 2026-07-27
+- **検出手段**: fix-spec-02実装後のOpus再確認(CLAUDE.mdワークフロー3段目)。**この欠陥はCodexの指摘ではなく、DEF-016(金額出力2桁契約)の修正そのものが新たに作り込んだ回帰**である。
+- **再現手順**: 入力バリデーションの桁数上限(単価整数部12桁・数量9桁)に近い明細を約10万件合算した合計額(係数28桁超)をCSV/Markdownで出力する。
+- **期待**: `aggregate()`が正しく計算できた合計額は、出力段でも例外なく整形できること。
+- **実際**: `format_money`が`amount.quantize(Decimal("0.01"))`をデフォルトのDecimalコンテキスト(精度28桁)で実行しており、係数が28桁を超える合計額で`decimal.InvalidOperation`が送出されCLIがクラッシュした(`aggregate()`はprec=50で正しく計算できているのに、出力段だけが落ちる)。
+- **原因分析**: DEF-010(集計の丸め誤差)の教訓で`aggregate()`は高精度コンテキストで実行するようにしたが、DEF-016で追加した`format_money`は同じ配慮を欠き、デフォルト精度のまま量子化していた。**「集計は直したが、同じ値を扱う出力層に同じ配慮を入れ忘れた」という、修正の非対称性が生んだ欠陥**。10万行規模はこのツールの設計想定内(性能テストも10万行)であり、実CLIパスで到達し得る。
+- **修正**: `format_money`内でも`localcontext(prec=50)`を使い、`aggregate()`と同じ余裕を持って量子化する。全ての金額出力(店舗別・商品別・日別・合計、CSV/Markdown両方)が`format_money`経由であることを確認済みのため、この一箇所の修正で全出力パスをカバーする。
+- **追加した回帰テスト**: `tests/test_report.py::test_format_money_handles_large_total_without_invalid_operation`(桁上限×10万件相当の合計額で例外を出さず`{value:.2f}`と一致すること)。赤→緑確認済み(localcontextを外すと実際に`InvalidOperation`で失敗)。
+- **教訓**: 「同じデータ型・同じ値を扱う複数の層」には、片方に入れた配慮(高精度コンテキスト)をもう片方にも対称に入れる必要がある。DEF-021(ログ漏洩とCLI引数漏洩は別対策)と同じ「片方の修正はもう片方を自動的にカバーしない」パターンであり、**レビューを重ねる(今回はOpus再確認)ことでしか捕まらない種類の欠陥**だった。fix-spec-02そのものが「一度の修正で完結しない」ことの実例をもう1件積み増した形。
+
 ## FIX2-09/11/15: テストの検証粒度の底上げ（Codex指摘・バグではなくテスト品質改善）
 
 - **FIX2-15（Codex#7・重いテストのslow分離）**: `test_aggregate_no_rounding_at_large_scale_with_default_28_digit_precision_would_fail`が毎回100,001個のオブジェクトを生成し通常のテスト実行を不必要に重くしていた。性能テストと同じ`slow`マーカーで分離（`pytest -m slow`で個別実行）。境界の意味(prec=50への依存)を保つため縮小はせず、分離のみで対応。

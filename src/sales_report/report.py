@@ -16,7 +16,7 @@ import os
 import stat
 import tempfile
 from collections.abc import Sequence
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_HALF_UP, Decimal, localcontext
 from pathlib import Path
 
 from sales_report.aggregate import AggregationResult
@@ -33,10 +33,23 @@ SUPPORTED_FORMATS: tuple[str, ...] = ("csv", "markdown")
 # 契約はあくまで出力層の責務とし、集計層(aggregate.py)は変更しない。
 _MONEY_QUANTUM = Decimal("0.01")
 
+# 量子化はデフォルトのDecimalコンテキスト(精度28桁)では、係数が28桁を超える
+# 巨大な合計額でInvalidOperationを送出しクラッシュする(DEF-022)。aggregate()が
+# prec=50で生成し得る大きさ(桁上限×10万行規模)を、出力層でも同じ余裕を持って
+# 整形できるよう、format_money内でも高精度コンテキストを使う。
+_MONEY_FORMAT_PRECISION = 50
+
 
 def format_money(amount: Decimal) -> str:
-    """金額をCSV/Markdown出力用に小数点以下2桁固定の文字列へ整形する。"""
-    return str(amount.quantize(_MONEY_QUANTUM, rounding=ROUND_HALF_UP))
+    """金額をCSV/Markdown出力用に小数点以下2桁固定の文字列へ整形する。
+
+    DEF-022: 巨大な合計額(係数28桁超)でも量子化がInvalidOperationにならないよう、
+    デフォルトコンテキスト(精度28桁)ではなく高精度コンテキストで量子化する
+    (aggregate()と同じ考え方。集計は正しくできても出力段で落ちる、を防ぐ)。
+    """
+    with localcontext() as ctx:
+        ctx.prec = _MONEY_FORMAT_PRECISION
+        return str(amount.quantize(_MONEY_QUANTUM, rounding=ROUND_HALF_UP))
 
 
 def sanitize_csv_field(value: str) -> str:

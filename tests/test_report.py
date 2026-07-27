@@ -48,6 +48,23 @@ def test_format_money(amount: Decimal, expected: str) -> None:
     assert format_money(amount) == expected
 
 
+def test_format_money_handles_large_total_without_invalid_operation() -> None:
+    """DEF-022(Opus再確認で発見): デフォルトのDecimalコンテキスト(精度28桁)では、
+    係数が28桁を超える巨大な合計額をquantizeするとInvalidOperationで落ちる。
+
+    aggregate()はprec=50で計算するため大桁の合計額を正しく生成できるが、
+    出力層のformat_moneyがデフォルト精度のままだと「集計は正しくできても
+    表示段で落ちる」というDEF-010と同型の欠陥になる。桁上限(単価12桁×数量9桁)の
+    行を10万件規模で合算した値に相当する大きさで、例外を出さず整形できること。
+    """
+    per_row = Decimal("999999999999.99") * 999999999
+    large_total = per_row * 100001  # 係数28桁超
+    # 例外を出さず、末尾が.00の2桁表記になること(整数値のため端数は0)。
+    result = format_money(large_total)
+    assert result.endswith(".00")
+    assert result == f"{large_total:.2f}"
+
+
 # --- sanitize_csv_field (BV-SEC-01/02) --------------------------------------
 
 
