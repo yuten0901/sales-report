@@ -6,6 +6,7 @@ DT-3(出力オプションの組み合わせ) に対応する。
 
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
 
@@ -29,6 +30,10 @@ app = typer.Typer(add_completion=False, help="複数の売上CSVを集計して�
 EXIT_SUCCESS = 0
 EXIT_NO_DATA = 1
 EXIT_USAGE_ERROR = 2
+
+# FIX2-06(Codex#12): webhook URLは秘密情報であり、CLI引数はシェル履歴・
+# プロセス一覧・ジョブ定義に露出する。環境変数での受け渡しを併用可能にする。
+_SLACK_WEBHOOK_ENV_VAR = "SALES_REPORT_SLACK_WEBHOOK"
 
 
 def _find_path_collision(
@@ -83,7 +88,13 @@ def main(
         help="スキップした行の理由付きレポートの出力先(指定時のみ出力)",
     ),
     slack_webhook: str | None = typer.Option(
-        None, "--slack-webhook", help="指定時、サマリをSlackへ通知する(既定では送信しない)"
+        None,
+        "--slack-webhook",
+        help=(
+            "指定時、サマリをSlackへ通知する(既定では送信しない)。"
+            f"秘密情報のため、可能な場合は環境変数{_SLACK_WEBHOOK_ENV_VAR}の"
+            "使用を推奨(このフラグの値はコマンド履歴・プロセス一覧に露出する)"
+        ),
     ),
 ) -> None:
     """複数の売上CSVを読み込み、集計してサマリレポートを出力する。"""
@@ -157,9 +168,12 @@ def main(
             raise typer.Exit(EXIT_USAGE_ERROR) from e
         typer.echo(f"エラーレポートを出力しました: {report_errors}")
 
-    if slack_webhook:
+    # FIX2-06(Codex#12): --slack-webhookフラグが明示指定されればそちらを優先し、
+    # 無ければ環境変数にフォールバックする(秘密情報をコマンド履歴に残さない経路)。
+    resolved_slack_webhook = slack_webhook or os.environ.get(_SLACK_WEBHOOK_ENV_VAR)
+    if resolved_slack_webhook:
         try:
-            send_slack_summary(slack_webhook, aggregation)
+            send_slack_summary(resolved_slack_webhook, aggregation)
         except NotifyError as e:
             typer.echo(f"警告: {e}", err=True)
 

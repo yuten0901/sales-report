@@ -76,6 +76,10 @@ sales-report --input data/sample/multi_store --output out/summary.md
 
 # Slack通知(任意。既定では送信しない)
 sales-report --input data/sample/sales.csv --slack-webhook https://hooks.slack.com/services/...
+
+# Slack通知(推奨: webhook URLは環境変数で渡す。コマンド履歴に残らない)
+export SALES_REPORT_SLACK_WEBHOOK=https://hooks.slack.com/services/...
+sales-report --input data/sample/sales.csv
 ```
 
 | オプション | 説明 | 既定値 |
@@ -84,7 +88,7 @@ sales-report --input data/sample/sales.csv --slack-webhook https://hooks.slack.c
 | `--format` | 出力形式: `csv` または `markdown` | `markdown` |
 | `--output` | サマリレポートの出力先パス | `out/summary.md` |
 | `--report-errors` | スキップした行の理由付きレポートの出力先(指定時のみ出力) | 出力しない |
-| `--slack-webhook` | 指定時、サマリをSlackへ通知する | 送信しない |
+| `--slack-webhook` | 指定時、サマリをSlackへ通知する。**秘密情報のためコマンド履歴・プロセス一覧への露出を避けたい場合は環境変数`SALES_REPORT_SLACK_WEBHOOK`を推奨**(フラグを明示指定した場合はそちらが優先) | 送信しない |
 
 終了コードは3段階(`docs/test-design.md` §1.4参照): `0`=成功 / `1`=有効な明細が0件 / `2`=入力・利用方法エラー。
 

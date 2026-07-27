@@ -290,3 +290,15 @@ DEF-013追記のFIX-09で追加した独立オラクル（`tests/test_properties
 - **修正**: `os.replace()`の直前に、一時ファイルのmodeを調整する`_match_mode_before_replace()`を追加。既存ファイルがあればそのmodeを複製し、無ければ`0o666 & ~umask`(通常のファイル作成と同じ規則。`os.umask()`は現在値を返す副作用のある呼び出しのため取得後ただちに元へ戻す)を適用する。
 - **追加した回帰テスト**: `tests/test_robustness.py::test_write_atomic_preserves_existing_file_permissions`・`test_write_atomic_new_file_uses_default_creation_mode`。`os.name != "posix"`でスキップする設計とし、**Linux CI(ubuntu-latest)レグで実際に実行されて初めて意味を持つ**(Windows開発機ではロジックが例外を出さないことのみ手動確認済み。真の検証はCI初回実行を待つ)。
 - **教訓**: 「クロスプラットフォームで動く」ことと「全プラットフォームでの意味論を正しく扱う」ことは別物。Windows専用の開発環境では、そもそもテストの土俵に上がらないPOSIX固有の欠陥がある(DEF-003の"環境制約"と対をなす、環境依存で"見えなくなる"欠陥の実例)。
+
+## DEF-021: Slack Webhook URLをCLI引数でのみ受け取っていた（Codex Medium#12）
+
+- **発見日**: 2026-07-27
+- **検出手段**: Codexによるリポジトリ全体の再レビュー
+- **再現手順**: `sales-report --slack-webhook https://hooks.slack.com/...`のようにwebhook URL(秘密情報)をコマンドライン引数として渡す。
+- **期待**: 秘密情報はシェル履歴・プロセス一覧（`ps`等）・ジョブ定義・監視ログに残らない経路で受け渡しできること。
+- **実際**: `--slack-webhook`フラグのみが唯一の受け渡し経路であり、上記の経路全てに露出し得た。banditはCLI引数経由の秘密情報漏洩を検出しない（静的解析の盲点）。
+- **原因分析**: DEF-011（ログ出力経由の漏洩）は修正済みだったが、そもそもの受け渡し経路自体の露出は別問題として見落としていた。
+- **修正**: 環境変数`SALES_REPORT_SLACK_WEBHOOK`によるフォールバックを追加（`--slack-webhook`フラグが明示指定されればそちらを優先）。`--help`にも秘密情報である旨と環境変数の使用推奨を明記。
+- **追加した回帰テスト**: `tests/test_cli.py::test_slack_webhook_env_var_is_used_when_flag_omitted`（環境変数のみで送信されること。旧実装では失敗することを確認=赤→緑）・`test_slack_webhook_flag_takes_priority_over_env_var`（両方設定時はフラグ優先）。
+- **教訓**: 「ログに出さない」（DEF-011）と「そもそも露出しにくい経路で受け渡す」（DEF-021）は別の対策であり、片方の修正がもう片方を自動的にカバーしない。

@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 import responses
 from typer.testing import CliRunner
 
@@ -472,3 +473,47 @@ def test_slack_notify_failure_still_succeeds_overall(
     assert result.exit_code == EXIT_SUCCESS
     assert output.exists()
     assert "Slack" in result.output
+
+
+@responses.activate
+def test_slack_webhook_env_var_is_used_when_flag_omitted(
+    tmp_path: Path, make_csv: MakeCsv, valid_csv_content: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """FIX2-06/DEF-021(Codex#12): --slack-webhookフラグを渡さなくても、
+    環境変数SALES_REPORT_SLACK_WEBHOOKが設定されていれば通知が送信される
+    (webhook URLをシェル履歴・プロセス一覧に残さない経路)。
+    """
+    webhook = "https://hooks.slack.example.com/services/T0/B0/ENV"
+    monkeypatch.setenv("SALES_REPORT_SLACK_WEBHOOK", webhook)
+    responses.add(responses.POST, webhook, json={"ok": True}, status=200)
+    path = make_csv("all_valid.csv", valid_csv_content)
+    output = tmp_path / "out" / "summary.md"
+
+    result = runner.invoke(app, ["--input", str(path), "--output", str(output)])
+
+    assert result.exit_code == EXIT_SUCCESS
+    assert len(responses.calls) == 1
+
+
+@responses.activate
+def test_slack_webhook_flag_takes_priority_over_env_var(
+    tmp_path: Path, make_csv: MakeCsv, valid_csv_content: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """FIX2-06: --slack-webhookフラグと環境変数の両方が設定されている場合、
+    フラグの値が優先されること。
+    """
+    flag_webhook = "https://hooks.slack.example.com/services/T0/B0/FLAG"
+    env_webhook = "https://hooks.slack.example.com/services/T0/B0/ENV"
+    monkeypatch.setenv("SALES_REPORT_SLACK_WEBHOOK", env_webhook)
+    responses.add(responses.POST, flag_webhook, json={"ok": True}, status=200)
+    path = make_csv("all_valid.csv", valid_csv_content)
+    output = tmp_path / "out" / "summary.md"
+
+    result = runner.invoke(
+        app, ["--input", str(path), "--output", str(output), "--slack-webhook", flag_webhook]
+    )
+
+    assert result.exit_code == EXIT_SUCCESS
+    assert len(responses.calls) == 1
+    assert responses.calls[0].request.url is not None
+    assert responses.calls[0].request.url.endswith("/FLAG")
