@@ -1,6 +1,7 @@
 # sales-report
 
-複数の売上CSVを読み込み、店舗別・商品別・日別に集計してサマリレポート(CSV/Markdown)を出力するCLIツール。
+A CLI tool that reads multiple sales CSV files and produces a summary report
+(CSV / Markdown) broken down by store, product and date.
 
 [![CI](https://github.com/yuten0901/sales-report/actions/workflows/ci.yml/badge.svg)](https://github.com/yuten0901/sales-report/actions/workflows/ci.yml)
 [![Security](https://github.com/yuten0901/sales-report/actions/workflows/security.yml/badge.svg)](https://github.com/yuten0901/sales-report/actions/workflows/security.yml)
@@ -8,16 +9,33 @@
 ![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-> カバレッジ100%は「テストがコードの各行・各分岐を通ること」を示す指標であり、それ自体が品質の証明ではない(実際、カバレッジ100%の状態から公開前・公開後のレビューで多数の欠陥が見つかった。経緯は[docs/test-report.md](docs/test-report.md)・[docs/defects.md](docs/defects.md))。数値は2026-07-27時点のローカル計測(行/分岐とも100%・手動更新)で、最新の実測はCIの`test-evidence-*` artifact(`coverage.xml`)で確認できる。
-> ミューテーションテスト(mutmut)は**実験的**で手動起動([.github/workflows/mutation.yml](.github/workflows/mutation.yml))とし、現状は環境適合が未完(理由は[docs/known-issues.md](docs/known-issues.md))。テストの検知力は当面、手動ミューテーションによる**補完的検証**で担保している(対象・方法・限界は[docs/test-report.md](docs/test-report.md) §3)。
+*日本語版: [README.ja.md](README.ja.md)*
+
+> **On that coverage badge.** 100% coverage means every line and branch is executed
+> by a test. It is not evidence of quality. This project reached 100% coverage and
+> then had a long list of real defects found in review, before and after release
+> ([docs/test-report.md](docs/test-report.md), [docs/defects.md](docs/defects.md)).
+> The number is a local measurement from 2026-07-27 and is updated by hand; the
+> current measured value is in the CI artifact `test-evidence-*` (`coverage.xml`).
+>
+> Mutation testing (mutmut) is **experimental** and manually triggered
+> ([.github/workflows/mutation.yml](.github/workflows/mutation.yml)); it does not yet
+> run to completion in this environment ([docs/known-issues.md](docs/known-issues.md)).
+> Until it does, the discriminating power of the test suite is backed by **manual
+> mutation as a complementary check** — scope, method and limits are in
+> [docs/test-report.md](docs/test-report.md) §3.
 
 ---
 
-## これは何か
+## What this is
 
-Excel等からエクスポートした売上CSV(複数ファイル・複数店舗)を集計し、店舗別・商品別・日別のサマリと、
-スキップした行の理由付きエラーレポートを出力する。個人開発のポートフォリオとして、**アプリの機能そのものより
-「どう品質を保証したか」を実物で示す**ことを目的に作成した。
+It aggregates sales CSVs exported from Excel or similar (multiple files, multiple
+stores) and emits a summary by store, product and date, plus an error report listing
+every skipped row with the reason it was skipped.
+
+This is a portfolio project. The goal is not the feature set — it is to show
+**how the quality was actually assured**, as something you can read rather than
+something I claim.
 
 ```
 $ sales-report --input data/sample/sales.csv --output out/summary.md
@@ -43,103 +61,142 @@ $ sales-report --input data/sample/sales.csv --output out/summary.md
 
 ---
 
-## 品質へのアプローチ
+## Approach to quality
 
-1. **テスト設計書**([docs/test-design.md](docs/test-design.md))で同値分割・境界値分析・デシジョンテーブルから観点を導出
-2. 導出した観点をIDで管理し、境界値・異常系を漏れなく網羅(観点ID → テスト関数の対応表あり)
-3. **プロパティベーステスト**(Hypothesis)で「性質」を大量のランダム入力で検証
-4. **ミューテーション観点**でテスト自体が「バグを実際に検出できるか」を検証(自動mmutmutは実験的・環境適合が未完のため、当面は手動ミューテーションによる補完的検証。詳細は[docs/test-report.md](docs/test-report.md)・[docs/known-issues.md](docs/known-issues.md))
-5. CI(GitHub Actions)でOS×Pythonバージョンのマトリクステスト・カバレッジ・セキュリティスキャンを実行し、結果をartifactに保存
-6. **テスト実行結果(JUnit XML・カバレッジHTML)をCIのartifactとして自動保存** — 手作業のエビデンス収集を、CIの成果物として自動で残す形に置き換えた
-
-「元QAとして、正常系だけでなく異常系・境界値まで責任を持つ」という進め方を、AIツールを活用しながら自分の設計・検証判断で実装したもの。
+1. **A written test design document** ([docs/test-design.md](docs/test-design.md))
+   derives the test conditions from equivalence partitioning, boundary value analysis
+   and decision tables.
+2. Those conditions are tracked by ID, so boundaries and error paths are covered
+   deliberately rather than incidentally (the document maps each condition ID to the
+   test function that covers it).
+3. **Property-based testing** (Hypothesis) verifies properties against large volumes
+   of generated input, rather than a handful of hand-picked cases.
+4. **Mutation thinking** is used to ask whether the tests can actually detect a bug.
+   Automated mutmut is experimental and does not yet complete here, so this is
+   currently covered by manual mutation as a complementary check
+   ([docs/test-report.md](docs/test-report.md), [docs/known-issues.md](docs/known-issues.md)).
+5. **CI** (GitHub Actions) runs an OS × Python version matrix, coverage and security
+   scanning, and stores the results as artifacts.
+6. **Test evidence is produced by CI, not by hand** — JUnit XML and the coverage HTML
+   report are saved as artifacts automatically, replacing manual evidence collection.
 
 ---
 
-## インストール・Usage
+## Install and usage
 
 ```bash
 pip install -e .
 ```
 
 ```bash
-# 基本(Markdown出力)
+# Basic (Markdown output)
 sales-report --input data/sample/sales.csv --output out/summary.md
 
-# CSV出力 + スキップ行の理由レポート
+# CSV output, plus a report of skipped rows and why
 sales-report --input data/sample/sales_with_errors.csv --format csv \
   --output out/summary.csv --report-errors out/errors.csv
 
-# ディレクトリ(複数CSV)をまとめて集計
+# Aggregate a whole directory of CSVs
 sales-report --input data/sample/multi_store --output out/summary.md
 
-# Slack通知(任意。既定では送信しない)
+# Slack notification (optional; nothing is sent by default)
 sales-report --input data/sample/sales.csv --slack-webhook https://hooks.slack.com/services/...
 
-# Slack通知(推奨: webhook URLは環境変数で渡す。コマンド履歴に残らない)
+# Slack notification (preferred: pass the webhook via an environment variable so it
+# does not end up in shell history or the process list)
 export SALES_REPORT_SLACK_WEBHOOK=https://hooks.slack.com/services/...
 sales-report --input data/sample/sales.csv
 ```
 
-| オプション | 説明 | 既定値 |
+| Option | Description | Default |
 |---|---|---|
-| `--input`(必須) | CSVファイル、またはCSVを含むディレクトリのパス | - |
-| `--format` | 出力形式: `csv` または `markdown` | `markdown` |
-| `--output` | サマリレポートの出力先パス | `out/summary.md` |
-| `--report-errors` | スキップした行の理由付きレポートの出力先(指定時のみ出力) | 出力しない |
-| `--slack-webhook` | 指定時、サマリをSlackへ通知する。**秘密情報のためコマンド履歴・プロセス一覧への露出を避けたい場合は環境変数`SALES_REPORT_SLACK_WEBHOOK`を推奨**(フラグを明示指定した場合はそちらが優先) | 送信しない |
+| `--input` (required) | Path to a CSV file, or a directory containing CSVs | - |
+| `--format` | Output format: `csv` or `markdown` | `markdown` |
+| `--output` | Where to write the summary report | `out/summary.md` |
+| `--report-errors` | Where to write the report of skipped rows with reasons (only written when specified) | not written |
+| `--slack-webhook` | When set, posts the summary to Slack. **This is a secret, so prefer the environment variable `SALES_REPORT_SLACK_WEBHOOK`** to keep it out of shell history and the process list (an explicit flag takes precedence) | not sent |
 
-終了コードは3段階(`docs/test-design.md` §1.4参照): `0`=成功 / `1`=有効な明細が0件 / `2`=入力・利用方法エラー。
+Exit codes are three-valued (see `docs/test-design.md` §1.4): `0` success /
+`1` no valid line items / `2` input or usage error.
 
-`data/sample/`にデモ用CSV(正常データ・エラーを含むデータ・Shift-JISデータ・複数店舗ディレクトリ)を同梱している。
+`data/sample/` contains demo CSVs: clean data, data containing errors, Shift-JIS
+encoded data, and a multi-store directory.
 
 ---
 
-## テスト戦略
+## Testing
 
-- **同値分割・境界値分析・デシジョンテーブル**で観点を導出([docs/test-design.md](docs/test-design.md))
-- 数量0・単価0は有効(境界値)、負の値は無効、全角数字は明示的に拒否(実装中に発見・修正 → [docs/defects.md](docs/defects.md))
-- **CSVインジェクション対策**(`=` `+` `-` `@`で始まる値の無害化)、**原子的書き込み**(プロセス中断時に中途半端な出力を残さない。fsync等の電源断レベルのdurabilityは対象外)、**冪等性**(同一入力での再実行結果がバイト同一)
-- **プロパティベーステスト**(Hypothesis): 総合計が店舗別/商品別/日別集計の合計と必ず一致する、行の入力順序を変えても結果が不変、等
-- **ゴールデンテスト**で出力フォーマットの回帰を検知
-- **性能テスト**: 10万行を約1秒・メモリ約52MBで処理(実測値。テストは3秒/150MB以内を閾値として下限保証する。通常実行から分離、`pytest -m slow`で実行)
-
-テストの実行方法:
+- Conditions derived from **equivalence partitioning, boundary value analysis and
+  decision tables** ([docs/test-design.md](docs/test-design.md))
+- Quantity 0 and unit price 0 are **valid** boundary values; negatives are invalid;
+  full-width digits are explicitly rejected (found and fixed during development —
+  see [docs/defects.md](docs/defects.md))
+- **CSV injection is neutralised** (values beginning with `=` `+` `-` `@`),
+  writes are **atomic** (an interrupted process never leaves a half-written file;
+  power-loss level durability via fsync is explicitly out of scope), and runs are
+  **idempotent** (the same input produces byte-identical output)
+- **Property-based tests** (Hypothesis): the grand total always equals the sum of the
+  per-store / per-product / per-date breakdowns; reordering the input rows never
+  changes the result; and so on
+- **Golden tests** catch regressions in the output format
+- **Performance**: 100,000 rows in roughly 1 second using about 52 MB (measured).
+  The test asserts a floor of 3 seconds / 150 MB rather than the measured value, and
+  is separated from the normal run (`pytest -m slow`)
 
 ```bash
-pytest --cov --cov-report=term-missing   # 通常テスト(性能テストは除外)
-pytest -m slow                            # 性能テストのみ
+pytest --cov --cov-report=term-missing   # normal tests (performance tests excluded)
+pytest -m slow                            # performance tests only
 ruff check .                              # lint
-mypy src/ tests/ scripts/                 # 型チェック(テストコード・CIスクリプトも対象)
-mutmut run                                # ミューテーションテスト(要WSL。Windowsネイティブ非対応)
+mypy src/ tests/ scripts/                 # type check (tests and CI scripts included)
+mutmut run                                # mutation testing (requires WSL; no native Windows support)
 ```
 
-## QAプロセス成果物
+## QA process documents
 
-顧客に納品する成果物と同じ意識で、実装だけでなくQAプロセス自体もドキュメント化している。
+*These are written in Japanese. Tables, diagrams, code identifiers and paths are
+readable as-is, and machine translation handles the prose well.*
 
-| 文書 | 内容 |
+The intent is to document the QA process itself with the same care as a deliverable
+handed to a client, not just to write the implementation.
+
+| Document | Contents |
 |---|---|
-| [docs/test-design.md](docs/test-design.md) | テスト設計書(同値分割・境界値・デシジョンテーブル・観点ID対応表・リスクベース優先度) |
-| [docs/test-report.md](docs/test-report.md) | テスト完了報告書(実施結果・残存リスク・リリース可否判断) |
-| [docs/defects.md](docs/defects.md) | 不具合管理表(実装中に実際に検出した不具合のみ。架空の事例は記載しない) |
-| [docs/exploratory-notes.md](docs/exploratory-notes.md) | 探索的テストの記録(チャーターとセッションノート) |
+| [docs/test-design.md](docs/test-design.md) | Test design (equivalence partitioning, boundaries, decision tables, condition-ID table, risk-based priority) |
+| [docs/test-report.md](docs/test-report.md) | Test completion report (results, residual risk, release decision) |
+| [docs/defects.md](docs/defects.md) | Defect log — only defects actually found during development; nothing invented |
+| [docs/exploratory-notes.md](docs/exploratory-notes.md) | Exploratory testing record (charters and session notes) |
+| [docs/known-issues.md](docs/known-issues.md) | Known issues, including why mutation testing is not yet complete |
 
-CIの実行結果(JUnit XML・カバレッジHTMLレポート)は各ワークフローのartifactとして自動保存され、mainブランチへのpush時にはカバレッジHTMLレポートをGitHub Pagesへ公開する。
+CI results (JUnit XML and the coverage HTML report) are stored as workflow artifacts,
+and pushes to `main` publish the coverage HTML report to GitHub Pages.
 
 ---
 
-## 設計メモ
+## Design notes
 
-- **金額計算は`Decimal`のみで行う**(floatを一切使わない)。丸め誤差を出さないための設計上の制約。ただしDecimalも既定精度(28桁)を超えると丸め誤差が生じるため、`unit_price`(整数部12桁・小数部2桁まで)・`quantity`(9桁まで)に入力段階で上限を設け、集計処理自体も精度50桁で実行している([docs/defects.md](docs/defects.md) DEF-010)
-- **出力の金額は常に小数点以下2桁で表示する契約**(`100`ではなく`100.00`)。unit_priceの入力上限が小数2桁(銭)までのため、この量子化は実運用では無損失。集計層(`aggregate.py`)自体は変更せず、出力層(`report.py`の`format_money`)だけの責務としている([docs/defects.md](docs/defects.md) DEF-016)
-- **数量0・単価0は有効な境界値**(無料サンプル等の実業務ケースを想定)。負の値のみ無効
-- **重複明細はエラーにせず合算**する(同一日・店舗・商品の複数行を許容)
-- **1ファイルの文字コード事故で全体を止めない**(UTF-8→Shift-JISへのフォールバック、それでも失敗したファイルのみスキップして処理継続)
-- **CSVインジェクション対策**として、`=` `+` `-` `@`で始まる文字列の先頭に`'`を付与(OWASP推奨)
-- **CLI終了コードは3段階**とし、「有効な明細が0件なのに正常終了する」という黙った失敗を作らない
+- **All monetary arithmetic uses `Decimal`; float is never used.** Decimal alone is
+  not sufficient, though — beyond the default 28-digit precision it also rounds. So
+  input limits are enforced up front (`unit_price` up to 12 integer digits and 2
+  decimal places, `quantity` up to 9 digits) and aggregation runs at 50-digit
+  precision ([docs/defects.md](docs/defects.md) DEF-010).
+- **Output amounts are always rendered with 2 decimal places** (`100.00`, never `100`).
+  Because unit prices are limited to 2 decimal places on input, this quantisation is
+  lossless in practice. The aggregation layer (`aggregate.py`) is untouched; this is
+  purely the responsibility of the output layer (`format_money` in `report.py`) —
+  see DEF-016.
+- **Quantity 0 and unit price 0 are valid boundary values** (free samples and similar
+  real cases). Only negative values are rejected.
+- **Duplicate line items are merged rather than rejected** — multiple rows for the
+  same date, store and product are allowed.
+- **One badly encoded file does not stop the run.** UTF-8 falls back to Shift-JIS, and
+  only the files that still fail are skipped; processing continues.
+- **CSV injection is mitigated** by prefixing `'` to values starting with
+  `=` `+` `-` `@` (OWASP guidance).
+- **The CLI has three exit codes**, so "finished successfully with zero valid line
+  items" can never be reported as plain success — that silent failure mode is
+  designed out.
 
-## 開発
+## Development
 
 ```bash
 pip install -e ".[dev]"
@@ -148,8 +205,8 @@ ruff check .
 mypy src/ tests/ scripts/
 ```
 
-Python 3.11以上。依存関係は`pyproject.toml`参照。
+Python 3.11+. See `pyproject.toml` for dependencies.
 
-## ライセンス
+## License
 
 MIT
